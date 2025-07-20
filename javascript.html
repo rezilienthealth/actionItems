@@ -1,0 +1,1201 @@
+<script>
+    // Global variables
+    let actionItems = [];
+    let actionItemOptions = {
+      actionItems: {
+        categories: {},
+        selectionTypes: {}
+      }
+    };
+    let currentTab = 'my-items';
+    let currentUser = '';
+    let userRole = '';
+    
+    function clearServerCache() {
+      console.log('Attempting to clear server cache...');
+      google.script.run
+        .withSuccessHandler(function(message) {
+          console.log(message);
+          alert('Server cache cleared. Please hard-refresh the page now (Cmd+Shift+R or Ctrl+Shift+R) and try again.');
+          // Force a reload of the options from the server
+          loadActionItemOptions(true);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Failed to clear server cache:', error.message);
+          alert('Error clearing server cache: ' + error.message);
+        })
+        .clearActionItemOptionsCache();
+    }
+
+    // Initialize the application
+    document.addEventListener('DOMContentLoaded', function() {
+      // Set user role (currentUser will be set in renderActionItems)
+      userRole = document.getElementById('user-role').dataset.role;
+      
+      // Initialize tab navigation
+      initTabs();
+      
+      // Initialize modal functionality
+      initModal();
+      
+      // Load data
+      loadActionItems();
+      
+      // Initialize event listeners
+      initEventListeners();
+
+      // This listener handles changes for all current and future category dropdowns
+      document.body.addEventListener('change', function(event) {
+        if (event.target.matches('.category-dropdown')) {
+          handleCategoryChange(event);
+        }
+      });
+    });
+    
+    // Initialize tab navigation
+    function initTabs() {
+      const tabButtons = document.querySelectorAll('.tab-button');
+      
+      tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+          const tabId = this.dataset.tab;
+          
+          // Update active tab button
+          tabButtons.forEach(btn => btn.classList.remove('active'));
+          this.classList.add('active');
+          
+          // Update active tab content
+          document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+          });
+          document.getElementById(tabId + '-tab').classList.add('active');
+          
+          // Update current tab
+          currentTab = tabId;
+          
+          // Refresh data if needed
+          if (tabId === 'my-items' || tabId === 'all-items') {
+            loadActionItems();
+          } else if (tabId === 'templates') {
+            loadTemplates();
+          } else if (tabId === 'options') {
+            loadActionItemOptions();
+          }
+        });
+      });
+    }
+    
+    // Initialize modal functionality
+    function initModal() {
+      const modal = document.getElementById('item-modal');
+      const closeBtn = document.querySelector('.close-modal');
+      const cancelBtn = document.getElementById('cancel-item-btn');
+      
+      closeBtn.addEventListener('click', closeModal);
+      cancelBtn.addEventListener('click', closeModal);
+      
+      window.addEventListener('click', function(event) {
+        if (event.target === modal) {
+          closeModal();
+        }
+      });
+      
+      // Initialize form submission
+      document.getElementById('item-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        saveActionItem();
+      });
+    }
+    
+    // Close modal
+    function closeModal() {
+      document.getElementById('item-modal').style.display = 'none';
+    }
+    
+    // Initialize event listeners
+    function initEventListeners() {
+      // New action item buttons
+      document.getElementById('new-item-btn').addEventListener('click', openNewItemModal);
+      document.getElementById('new-item-btn-all').addEventListener('click', openNewItemModal);
+      document.getElementById('new-template-btn').addEventListener('click', openNewTemplateModal);
+      
+      // Add debug button for viewing logs
+      const debugButton = document.createElement('button');
+      debugButton.textContent = 'View Server Logs';
+      debugButton.style.position = 'fixed';
+      debugButton.style.bottom = '10px';
+      debugButton.style.right = '10px';
+      debugButton.style.zIndex = '9999';
+      debugButton.style.padding = '8px 16px';
+      debugButton.style.backgroundColor = '#f44336';
+      debugButton.style.color = 'white';
+      debugButton.style.border = 'none';
+      debugButton.style.borderRadius = '4px';
+      debugButton.style.cursor = 'pointer';
+      debugButton.addEventListener('click', viewServerLogs);
+      document.body.appendChild(debugButton);
+      
+      // Filter listeners
+      document.getElementById('status-filter').addEventListener('change', filterItems);
+      document.getElementById('search-input').addEventListener('input', filterItems);
+  
+      document.getElementById('status-filter-all').addEventListener('change', filterItems);
+      document.getElementById('search-input-all').addEventListener('input', filterItems);
+      
+      // Add comment button
+      document.getElementById('add-comment-btn').addEventListener('click', addComment);
+      
+      // Event delegation for action item buttons
+      function handleActionItemClick(event) {
+        const target = event.target;
+        if (target.classList.contains('action-btn')) {
+          const card = target.closest('.item-card');
+          if (card) {
+            const itemId = card.dataset.id;
+            const action = target.dataset.action;
+
+            if (action === 'edit') {
+              editActionItem(itemId);
+            } else if (action === 'complete') {
+              completeActionItem(itemId);
+            } else if (action === 'delete') {
+              deleteActionItem(itemId);
+            }
+          }
+        }
+      }
+
+      document.getElementById('my-items-container').addEventListener('click', handleActionItemClick);
+      document.getElementById('all-items-container').addEventListener('click', handleActionItemClick);
+    }
+    
+    // Filter items
+    function filterItems() {
+      renderActionItems();
+    }
+    
+    // Load action items
+    function loadActionItems() {
+      showSpinner('Loading action items...');
+      
+      google.script.run
+        .withSuccessHandler(function(items) {
+          console.log('ITEMS RECEIVED FROM SERVER:', items);
+          console.log('ITEMS TYPE:', typeof items);
+          console.log('ITEMS JSON:', JSON.stringify(items));
+          // alert('Action items received: ' + (items ? items.length : 'none') + '. Check console for details.');
+          actionItems = items;
+          renderActionItems();
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading action items:', error);
+          hideSpinner();
+          alert('Error loading action items: ' + error);
+        })
+        .getAndProcessClientActionItems();
+    }
+    
+    function editActionItem(actionItemId) {
+      const item = actionItems.find(i => i.actionItemId === actionItemId);
+      if (!item) {
+        console.error('Action item not found for editing:', actionItemId);
+        return;
+      }
+
+      // Populate the modal with the item's data
+      document.getElementById('item-id').value = item.actionItemId;
+      document.getElementById('item-title').value = item.title;
+      document.getElementById('item-description').value = item.description;
+      document.getElementById('item-assigned-to').value = item.assignedTo;
+      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
+      document.getElementById('item-priority').value = item.priority;
+      document.getElementById('item-status').value = item.status;
+      document.getElementById('item-notes').value = item.notes;
+      
+      openNewItemModal();
+
+      // Handle category selection after modal is open and populated
+      if (item.categoryPath) {
+        const pathParts = item.categoryPath.split('/');
+        selectCategoryPath(pathParts);
+      }
+    }
+
+    async function selectCategoryPath(path) {
+      if (!path || path.length === 0) return;
+
+      // Ensure options are loaded before proceeding
+      if (!actionItemOptions || !actionItemOptions.actionItems) {
+        await new Promise(resolve => loadActionItemOptions(resolve));
+      }
+
+      // Set the top-level category
+      const categorySelect = document.getElementById('item-category');
+      categorySelect.value = path[0];
+      categorySelect.dispatchEvent(new Event('change'));
+
+      // Sequentially set the value for each subsequent dropdown
+      for (let i = 1; i < path.length; i++) {
+        const level = i + 1;
+        // Wait for the next dropdown to be created by the change event
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay to allow UI to update
+        const nextSelect = document.querySelector(`select[data-level='${level}']`);
+        if (nextSelect) {
+          nextSelect.value = path[i];
+          nextSelect.dispatchEvent(new Event('change'));
+        } else {
+          console.error(`Could not find dropdown for level ${level} with value ${path[i]}`);
+          break;
+        }
+      }
+    }
+
+    function saveActionItem() {
+      showSpinner('Saving action item...');
+      
+      const path = [document.getElementById('item-category').value];
+      const dynamicContainer = document.getElementById('dynamic-category-container');
+      const dynamicSelects = dynamicContainer.querySelectorAll('select');
+      dynamicSelects.forEach(select => {
+        if (select.value) {
+          path.push(select.value);
+        }
+      });
+
+      const item = {
+        actionItemId: document.getElementById('item-id').value,
+        title: document.getElementById('item-title').value,
+        description: document.getElementById('item-description').value,
+        assignedTo: document.getElementById('item-assigned-to').value,
+        dueDate: document.getElementById('item-due-date').value,
+        priority: document.getElementById('item-priority').value,
+        status: document.getElementById('item-status').value,
+        notes: document.getElementById('item-notes').value,
+        categoryPath: path.filter(p => p).join('/'),
+      };
+      
+      google.script.run
+        .withSuccessHandler(function(savedItem) {
+          console.log('Item saved:', savedItem);
+          closeModal();
+          loadActionItems(); // This will refresh the entire list
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error saving item:', error);
+          hideSpinner();
+          alert('Error saving item: ' + error);
+        })
+        .saveActionItem(item);
+    }
+    
+    // Load action item options from the server
+    function loadActionItemOptions(callback) {
+      showSpinner('Loading options...');
+      
+      google.script.run
+        .withSuccessHandler(function(options) {
+          console.log('Received actionItemOptions from server:', options);
+          if (options && options.actionItems) {
+            actionItemOptions = options;
+            console.log('Global actionItemOptions set:', actionItemOptions);
+          } else {
+            console.error('Invalid options structure received from server:', options);
+            // Initialize with empty structure to prevent errors
+            actionItemOptions = { actionItems: { categories: {}, selectionTypes: {} } };
+          }
+          hideSpinner();
+          // Execute callback if provided
+          if (callback) {
+            callback();
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading action item options:', error);
+          hideSpinner();
+          alert('Error loading action item options: ' + error.message);
+        })
+        .getClientActionItemOptions();
+    }
+    
+    // Legacy function to handle server errors
+    function handleServerError(error) {
+      console.error('Error loading options:', error);
+      hideSpinner();
+      alert('Error loading options: ' + error);
+      
+      // Call the callback with null if provided
+      if (typeof callback === 'function') {
+        callback(null);
+      }
+    }
+    
+    // Load templates
+    function loadTemplates() {
+      showSpinner('Loading templates...');
+      
+      google.script.run
+        .withSuccessHandler(function(templates) {
+          renderTemplates(templates);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading templates:', error);
+          hideSpinner();
+          alert('Error loading templates: ' + error);
+        })
+        .getActionItemTemplates();
+    }
+    
+    // Render action items
+    function renderActionItems() {
+      // Set current user each time we render to avoid race conditions
+      currentUser = document.getElementById('user-email').textContent.trim();
+      const myItemsContainer = document.getElementById('my-items-container');
+      const allItemsContainer = document.getElementById('all-items-container');
+      
+      // Clear containers and check if actionItems is a valid array
+      myItemsContainer.innerHTML = '';
+      allItemsContainer.innerHTML = '';
+      if (!actionItems || !Array.isArray(actionItems) || actionItems.length === 0) {
+        myItemsContainer.innerHTML = '<div class="empty-state">No action items found</div>';
+        allItemsContainer.innerHTML = '<div class="empty-state">No action items found</div>';
+        return;
+      }
+      
+      let itemsToRender = [];
+      
+      if (currentTab === 'my-items') {
+        let filteredItems = actionItems.filter(item => 
+          item.assignedTo === currentUser || 
+          item.createdBy === currentUser ||
+          (item.mentionedUsers && item.mentionedUsers.includes(currentUser))
+        );
+        
+        const statusFilter = document.getElementById('status-filter').value;
+        const searchText = document.getElementById('search-input').value.toLowerCase();
+        
+        if (statusFilter !== 'all') {
+          filteredItems = filteredItems.filter(item => item.status === statusFilter);
+        }
+        
+        if (searchText) {
+          filteredItems = filteredItems.filter(item => 
+            (item.title && item.title.toLowerCase().includes(searchText)) ||
+            (item.description && item.description.toLowerCase().includes(searchText))
+          );
+        }
+        
+        myItemsContainer.innerHTML = filteredItems.length > 0 
+          ? filteredItems.map(item => renderActionItemCard(item)).join('')
+          : '<div class="empty-state">No action items found for you.</div>';
+
+      } else if (currentTab === 'all-items') {
+        let filteredItems = actionItems;
+
+        const statusFilter = document.getElementById('status-filter-all').value;
+        const searchText = document.getElementById('search-input-all').value.toLowerCase();
+        
+        if (statusFilter !== 'all') {
+          filteredItems = filteredItems.filter(item => item.status === statusFilter);
+        }
+        
+        if (searchText) {
+          filteredItems = filteredItems.filter(item => 
+            (item.title && item.title.toLowerCase().includes(searchText)) ||
+            (item.description && item.description.toLowerCase().includes(searchText))
+          );
+        }
+
+        allItemsContainer.innerHTML = filteredItems.length > 0 
+          ? filteredItems.map(item => renderActionItemCard(item)).join('')
+          : '<div class="empty-state">No action items found.</div>';
+      }
+      
+      // Add click event listeners to item cards
+      document.querySelectorAll('.item-card').forEach(card => {
+        card.addEventListener('click', function(event) {
+          if (!event.target.closest('.item-actions')) {
+            const itemId = this.dataset.id;
+            openItemDetails(itemId);
+          }
+        });
+      });
+    }
+    
+    // Render a single action item card
+    function renderActionItemCard(item) {
+      const statusClass = getStatusClass(item.status);
+      
+      return `
+        <div class="item-card" data-id="${item.actionItemId}">
+          <div class="item-info">
+            <div class="item-title">${item.title}</div>
+            <div class="item-meta">
+              <span class="status-badge ${statusClass}">${item.status}</span>
+              ${item.dueDate ? `<span>Due: ${formatDate(item.dueDate)}</span>` : ''}
+              ${item.assignedTo ? `<span>Assigned to: ${item.assignedTo}</span>` : ''}
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="action-btn" data-action="edit">Edit</button>
+            ${item.status !== 'Completed' ? `<button class="action-btn" data-action="complete">Complete</button>` : ''}
+            <button class="action-btn" data-action="delete">Delete</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Get status class
+    function getStatusClass(status) {
+      switch (status) {
+        case 'Open': return 'status-open';
+        case 'In Progress': return 'status-in-progress';
+        case 'Pending Approval': return 'status-pending';
+        case 'Completed': return 'status-completed';
+        default: return '';
+      }
+    }
+
+    // Format date
+    function formatDate(date) {
+      if (!date) return '';
+      const d = new Date(date);
+      return d.toLocaleDateString();
+    }
+
+    // Format date for input fields
+    function formatDateForInput(date) {
+      const d = new Date(date);
+      return d.toISOString().split('T')[0];
+    }
+
+    // View server logs
+    function viewServerLogs() {
+      console.log('Fetching server logs...');
+      showSpinner('Fetching server logs...');
+
+      google.script.run
+        .withSuccessHandler(function(logs) {
+          hideSpinner();
+          console.log('Server logs received:', logs);
+
+          // Create modal for logs
+          const modal = document.createElement('div');
+          modal.style.position = 'fixed';
+          modal.style.left = '0';
+          modal.style.top = '0';
+          modal.style.width = '100%';
+          modal.style.height = '100%';
+          modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
+          modal.style.zIndex = '10000';
+          modal.style.display = 'flex';
+          modal.style.justifyContent = 'center';
+          modal.style.alignItems = 'center';
+
+          const content = document.createElement('div');
+          content.style.backgroundColor = 'white';
+          content.style.padding = '20px';
+          content.style.borderRadius = '5px';
+          content.style.width = '80%';
+          content.style.height = '80%';
+          content.style.overflow = 'auto';
+
+          const closeBtn = document.createElement('button');
+          closeBtn.textContent = 'Close';
+          closeBtn.style.marginBottom = '10px';
+          closeBtn.addEventListener('click', function() {
+            document.body.removeChild(modal);
+          });
+
+          const pre = document.createElement('pre');
+          pre.style.whiteSpace = 'pre-wrap';
+          pre.style.wordBreak = 'break-word';
+          pre.textContent = logs;
+
+          content.appendChild(closeBtn);
+          content.appendChild(pre);
+          modal.appendChild(content);
+          document.body.appendChild(modal);
+        })
+        .withFailureHandler(handleServerError)
+        .getClientActionItemOptions();
+    }
+
+    function openNewItemModal() {
+      const modal = document.getElementById('item-modal');
+      const form = document.getElementById('item-form');
+      const modalTitle = document.getElementById('modal-title');
+
+      // 1. Reset the form completely for a new item
+      if (form) form.reset();
+      document.getElementById('item-id').value = '';
+      document.getElementById('dynamic-category-container').innerHTML = ''; // Clear previous dynamic dropdowns
+
+      // 2. Reset all fields to be editable by default
+      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'diagnosisCode', 'diagnosisName'];
+      fields.forEach(field => {
+        const element = form.querySelector(`#item-${field.replace(/([A-Z])/g, '-$1').toLowerCase()}`);
+        if (element) {
+          element.readOnly = false;
+          element.classList.remove('readonly');
+        }
+      });
+
+      // 3. Set modal title for a new item
+      if (modalTitle) modalTitle.textContent = 'New Action Item';
+
+      // 4. Load/reload options and populate the first dropdown as a callback
+      console.log('Loading options and populating categories...');
+      loadActionItemOptions(populateTopLevelCategories);
+
+      // 5. Show the modal
+      if (modal) modal.style.display = 'block';
+    }
+
+    // Open new template modal
+    function openNewTemplateModal() {
+      const modal = document.getElementById('item-modal');
+      const form = document.getElementById('item-form');
+      const modalTitle = document.getElementById('modal-title');
+
+      // Reset form
+      if (form) form.reset();
+
+      // Reset item ID
+      const itemIdField = document.getElementById('item-id');
+      if (itemIdField) itemIdField.value = '';
+
+      // Set modal title
+      if (modalTitle) modalTitle.textContent = 'New Template';
+
+      // Set type to actionItems since we're not showing the type selection
+      const typeField = document.getElementById('item-type');
+      if (typeField) typeField.value = 'actionItems';
+
+      // Set template flag
+      const isTemplateField = document.getElementById('is-template');
+      if (isTemplateField) isTemplateField.value = 'true';
+
+      // Load options if not already loaded
+      if (!actionItemOptions) {
+        loadActionItemOptions(function() {
+          updateCategoryOptions();
+        });
+      } else {
+        updateCategoryOptions();
+      }
+
+      // Show modal
+      if (modal) modal.style.display = 'block';
+      else if (typeof $ !== 'undefined' && $('#new-item-modal').length) {
+        $('#new-item-modal').modal('show');
+      }
+    }
+
+    // Open item details
+    function openItemDetails(itemId) {
+      const modal = document.getElementById('item-modal');
+      const modalTitle = document.getElementById('modal-title');
+
+      // Find the item
+      const item = actionItems.find(item => item.actionItemId === itemId);
+
+      if (!item) {
+        alert('Item not found');
+        return;
+      }
+
+      // Set modal title
+      modalTitle.textContent = 'Edit Action Item';
+
+      // Fill form with item data
+      document.getElementById('item-id').value = item.actionItemId;
+      document.getElementById('item-type').value = item.actionItemType;
+      document.getElementById('item-status').value = item.status;
+      document.getElementById('item-title').value = item.title;
+      document.getElementById('item-description').value = item.description || '';
+      document.getElementById('item-assignee').value = item.assignedTo || '';
+      document.getElementById('item-due-date').value = item.dueDate ? formatDateForInput(item.dueDate) : '';
+      document.getElementById('item-tags').value = item.tags ? item.tags.join(', ') : '';
+
+      // Update category options based on item type
+      updateCategoryOptions();
+
+      // If item has category path, set the appropriate selections
+      if (item.categoryPath) {
+        const pathParts = item.categoryPath.split('/');
+
+        // Wait for options to load
+        setTimeout(() => {
+          // Set category if available
+          if (pathParts.length > 0 && pathParts[0]) {
+            const categorySelect = document.getElementById('item-category');
+            setSelectOption(categorySelect, pathParts[0]);
+            updateSubcategoryOptions();
+
+            // Set subcategory if available
+            if (pathParts.length > 1 && pathParts[1]) {
+              setTimeout(() => {
+                const subcategorySelect = document.getElementById('item-subcategory');
+                setSelectOption(subcategorySelect, pathParts[1]);
+                updateOptionsList();
+
+                // Set option if available
+                if (pathParts.length > 2 && pathParts[2]) {
+                  setTimeout(() => {
+                    const optionSelect = document.getElementById('item-option');
+                    setSelectOption(optionSelect, pathParts[2]);
+                  }, 100);
+                }
+              }, 100);
+            }
+          }
+        }, 100);
+      }
+
+      // Show modal
+      modal.style.display = 'block';
+
+      // Load comments
+      loadComments(itemId);
+
+      // Load history
+      loadHistory(itemId);
+    }
+
+    // Helper function to set select option by value
+    function setSelectOption(selectElement, value) {
+      for (let i = 0; i < selectElement.options.length; i++) {
+        if (selectElement.options[i].value === value) {
+          selectElement.selectedIndex = i;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Load comments
+    function loadComments(itemId) {
+      const commentsContainer = document.getElementById('comments-container');
+      commentsContainer.innerHTML = '<div class="loading">Loading comments...</div>';
+
+      google.script.run
+        .withSuccessHandler(function(comments) {
+          if (comments.length === 0) {
+            commentsContainer.innerHTML = '<div class="empty-state">No comments yet</div>';
+            return;
+          }
+
+          commentsContainer.innerHTML = comments.map(comment => `
+            <div class="comment">
+              <div class="comment-header">
+                <span class="comment-author">${comment.author}</span>
+                <span class="comment-date">${formatDate(comment.timestamp)}</span>
+              </div>
+              <div class="comment-content">${comment.content}</div>
+            </div>
+          `).join('');
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading comments:', error);
+          commentsContainer.innerHTML = '<div class="error">Error loading comments</div>';
+        })
+        .getCommentsForActionItem(itemId);
+    }
+
+    // Load history
+    function loadHistory(itemId) {
+      const historyContainer = document.getElementById('history-container');
+      historyContainer.innerHTML = '<div class="loading">Loading history...</div>';
+
+      google.script.run
+        .withSuccessHandler(function(history) {
+          if (history.length === 0) {
+            historyContainer.innerHTML = '<div class="empty-state">No history yet</div>';
+            return;
+          }
+
+          historyContainer.innerHTML = history.map(event => `
+            <div class="history-item">
+              <div class="history-header">
+                <span class="history-date">${formatDate(event.changedAt)}</span>
+                <span class="history-user">${event.changedBy}</span>
+              </div>
+              <div class="history-content">
+                Changed ${event.fieldChanged} from "${event.oldValue}" to "${event.newValue}"
+              </div>
+            </div>
+          `).join('');
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading history:', error);
+          historyContainer.innerHTML = '<div class="error">Error loading history</div>';
+        })
+        .getActionItemHistory(itemId);
+    }
+
+    // Edit action item
+    function editActionItem(actionItemId) {
+      const item = actionItems.find(i => i.actionItemId === actionItemId);
+      if (!item) {
+        console.error('Action item not found for editing:', actionItemId);
+        return;
+      }
+
+      // Populate the modal with the item's data
+      document.getElementById('item-id').value = item.actionItemId;
+      document.getElementById('item-title').value = item.title;
+      document.getElementById('item-description').value = item.description;
+      document.getElementById('item-assigned-to').value = item.assignedTo;
+      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
+      document.getElementById('item-priority').value = item.priority;
+      document.getElementById('item-status').value = item.status;
+      document.getElementById('item-notes').value = item.notes;
+
+      openNewItemModal();
+
+      // Handle category selection after modal is open and populated
+      if (item.categoryPath) {
+        const pathParts = item.categoryPath.split('/');
+        selectCategoryPath(pathParts);
+      }
+    }
+
+    async function selectCategoryPath(path) {
+      if (!path || path.length === 0) return;
+
+      // Ensure options are loaded before proceeding
+      if (!actionItemOptions || !actionItemOptions.actionItems) {
+        await new Promise(resolve => loadActionItemOptions(resolve));
+      }
+
+      // Set the top-level category
+      const categorySelect = document.getElementById('item-category');
+      categorySelect.value = path[0];
+      categorySelect.dispatchEvent(new Event('change'));
+
+      // Sequentially set the value for each subsequent dropdown
+      for (let i = 1; i < path.length; i++) {
+        const level = i + 1;
+        // Wait for the next dropdown to be created by the change event
+        await new Promise(resolve => setTimeout(resolve, 50)); // Small delay to allow UI to update
+        const nextSelect = document.querySelector(`select[data-level='${level}']`);
+        if (nextSelect) {
+          nextSelect.value = path[i];
+          nextSelect.dispatchEvent(new Event('change'));
+        } else {
+          console.error(`Could not find dropdown for level ${level} with value ${path[i]}`);
+          break;
+        }
+      }
+    }
+
+    // Save action item
+    function saveActionItem() {
+      showSpinner('Saving action item...');
+
+      const pathParts = [];
+      let level = 1;
+      let dropdown;
+      while (dropdown = document.querySelector(`select[data-level='${level}']`)) {
+        if (dropdown.value) {
+          pathParts.push(dropdown.value);
+        } else {
+          // Stop if a dropdown is not selected, as the path is incomplete
+          break;
+        }
+        level++;
+      }
+
+      const item = {
+        actionItemId: document.getElementById('item-id').value,
+        title: document.getElementById('item-title').value,
+        description: document.getElementById('item-description').value,
+        assignedTo: document.getElementById('item-assigned-to').value,
+        dueDate: document.getElementById('item-due-date').value,
+        priority: document.getElementById('item-priority').value,
+        status: document.getElementById('item-status').value,
+        notes: document.getElementById('item-notes').value,
+        categoryPath: pathParts.join('/'),
+      };
+
+      google.script.run
+        .withSuccessHandler(function(savedItem) {
+          console.log('Item saved:', savedItem);
+          closeModal();
+          loadActionItems();
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error saving item:', error);
+          hideSpinner();
+          alert('Error saving item: ' + error);
+        })
+        .saveActionItem(item);
+    }
+
+    // Add comment
+    function addComment() {
+      const itemId = document.getElementById('item-details-content').dataset.itemId; // Get item ID from details view
+      const commentContent = document.getElementById('new-comment').value;
+
+      if (!commentContent.trim()) {
+        alert('Please enter a comment');
+        return;
+      }
+
+      showSpinner('Adding comment...');
+
+      google.script.run
+        .withSuccessHandler(function() {
+          document.getElementById('new-comment').value = '';
+          loadComments(itemId);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding comment:', error);
+          hideSpinner();
+          alert('Error adding comment: ' + error);
+        })
+        .addCommentToActionItem(itemId, { content: commentContent });
+    }
+
+    // Show spinner
+    function showSpinner(message) {
+      document.getElementById('spinner-overlay').classList.remove('hidden');
+      document.getElementById('spinner-message').textContent = message || 'Loading...';
+    }
+    
+    // Hide spinner
+    function hideSpinner() {
+      document.getElementById('spinner-overlay').classList.add('hidden');
+    }
+    
+    // Render templates
+    function renderTemplates(templates) {
+      const templatesContainer = document.getElementById('templates-container');
+      
+      if (!templates || templates.length === 0) {
+        templatesContainer.innerHTML = '<div class="empty-state">No templates found</div>';
+        return;
+      }
+      
+      templatesContainer.innerHTML = templates.map(template => `
+        <div class="item-card template-card" data-id="${template.actionItemId}">
+          <div class="item-info">
+            <div class="item-title">${template.title}</div>
+            <div class="item-meta">
+              <span>${template.actionItemType}</span>
+              ${template.categoryPath ? `<span>Category: ${template.categoryPath}</span>` : ''}
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="action-btn" data-action="use">Use</button>
+            <button class="action-btn" data-action="edit">Edit</button>
+            <button class="action-btn" data-action="delete">Delete</button>
+          </div>
+        </div>
+      `).join('');
+      
+      // Add click event listeners to template cards
+      document.querySelectorAll('.template-card').forEach(card => {
+        card.addEventListener('click', function(event) {
+          if (!event.target.closest('.item-actions')) {
+            const templateId = this.dataset.id;
+            openItemDetails(templateId);
+          }
+        });
+      });
+      
+      // Add click event listeners to action buttons
+      document.querySelectorAll('.template-card .action-btn').forEach(btn => {
+        btn.addEventListener('click', function(event) {
+          event.stopPropagation();
+          const templateId = this.closest('.template-card').dataset.id;
+          const action = this.dataset.action;
+          
+          if (action === 'edit') {
+            openItemDetails(templateId);
+          } else if (action === 'delete') {
+            confirmDeleteItem(templateId);
+          } else if (action === 'use') {
+            useTemplate(templateId);
+          }
+        });
+      });
+    }
+    
+    // Function to use a template's data to populate the form
+    function useTemplate(templateData) {
+      console.log('Populating form from template data:', templateData);
+
+      // --- Field Population ---
+      const form = document.getElementById('item-form');
+      form.querySelector('#item-title').value = templateData.title || '';
+      form.querySelector('#item-description').value = templateData.description || '';
+      form.querySelector('#item-status').value = templateData.defaultStatus || 'Open';
+      form.querySelector('#item-priority').value = templateData.defaultPriority || 'Medium';
+      form.querySelector('#item-assignee').value = templateData.defaultAssignedTo || '';
+      form.querySelector('#item-tags').value = templateData.defaultTags || '';
+      form.querySelector('#item-diagnosis-code').value = templateData.diagnosisCode || '';
+      form.querySelector('#item-diagnosis-name').value = templateData.diagnosisName || '';
+
+      // --- Editability Logic ---
+      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'diagnosisCode', 'diagnosisName'];
+      fields.forEach(field => {
+        const element = form.querySelector(`#item-${field.replace(/([A-Z])/g, '-$1').toLowerCase()}`);
+        // Correctly check for the readOnly property, e.g., 'readOnly_title'
+        const isReadOnly = templateData[`readOnly_${field}`] === true || String(templateData[`readOnly_${field}`]).toUpperCase() === 'TRUE';
+        if (element) {
+          element.readOnly = isReadOnly;
+          element.classList.toggle('readonly', isReadOnly);
+        }
+      });
+
+      // --- Hide Category Selectors ---
+      const categoryContainer = document.getElementById('category-container');
+      if(categoryContainer) {
+        categoryContainer.style.display = 'none'; // Hide the dropdowns as the choice is made
+      }
+    }
+    
+    // Function to confirm deletion of an item
+    function confirmDeleteItem(itemId) {
+      if (confirm('Are you sure you want to delete this item?')) {
+        deleteItem(itemId);
+      }
+    }
+    
+    // Function to delete an item
+    function deleteItem(itemId) {
+      showSpinner('Deleting item...');
+      
+      google.script.run
+        .withSuccessHandler(function() {
+          loadActionItems();
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error deleting item:', error);
+          hideSpinner();
+          alert('Error deleting item: ' + error);
+        })
+        .deleteActionItem(itemId);
+    }
+    
+    // Function to render options tree
+    function renderOptionsTree() {
+      const taskOptionsTree = document.getElementById('task-options-tree');
+      const orderOptionsTree = document.getElementById('order-options-tree');
+      
+      if (!actionItemOptions || !actionItemOptions.Task || !actionItemOptions.Order) {
+        taskOptionsTree.innerHTML = '<div class="empty-state">No task options found</div>';
+        orderOptionsTree.innerHTML = '<div class="empty-state">No order options found</div>';
+        return;
+      }
+      
+      // Render task options
+      taskOptionsTree.innerHTML = renderCategoryTree(actionItemOptions.Task.categories);
+      
+      // Render order options
+      orderOptionsTree.innerHTML = renderCategoryTree(actionItemOptions.Order.categories);
+      
+      // Add event listeners to tree nodes
+      document.querySelectorAll('.tree-node-toggle').forEach(toggle => {
+        toggle.addEventListener('click', function() {
+          const node = this.closest('.tree-node');
+          node.classList.toggle('expanded');
+          this.textContent = node.classList.contains('expanded') ? '−' : '+';
+        });
+      });
+    }
+    
+    function renderCategoryTree(categories) {
+      let html = '';
+      for (const key in categories) {
+        const category = categories[key];
+        const hasSubcategories = category.subcategories && Object.keys(category.subcategories).length > 0;
+        const hasOptions = category.options && category.options.length > 0;
+        html += `
+          <div class="tree-node">
+            <div class="tree-node-content">
+              ${(hasSubcategories || hasOptions) ? `<span class="tree-node-toggle">+</span>` : '<span class="tree-node-toggle" style="visibility:hidden">+</span>'}
+              <span class="tree-node-label">${category.displayName}</span>
+            </div>
+            ${(hasSubcategories || hasOptions) ? `
+              <div class="tree-node-children">
+                ${hasSubcategories ? renderCategoryTree(category.subcategories) : ''}
+                ${hasOptions ? category.options.map(option => `
+                  <div class="tree-node option-node">
+                    <div class="tree-node-content">
+                      <span class="tree-node-toggle" style="visibility:hidden">+</span>
+                      <span class="tree-node-label">${option.displayName || option}</span>
+                    </div>
+                  </div>
+                `).join('') : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+      return html;
+    }
+
+    // Generates the HTML for a single action item
+    function generateActionItemHTML(item) {
+      let html = `
+        <div class="action-item" data-id="${item.id}">
+          <div class="item-header">
+            <span class="item-title">${item.title}</span>
+            <div class="item-actions">
+              <button class="edit-btn">Edit</button>
+              <button class="complete-btn">Complete</button>
+              <button class="delete-btn">Delete</button>
+            </div>
+          </div>
+          <div class="item-body">
+            <p>${item.description}</p>
+            <p><strong>Status:</strong> ${item.status}</p>
+            <p><strong>Assigned To:</strong> ${item.assignee}</p>
+            <p><strong>Due:</strong> ${item.dueDate ? new Date(item.dueDate).toLocaleDateString() : 'Not set'}</p>
+            ${item.tags ? `<p><strong>Tags:</strong> ${item.tags}</p>` : ''}
+          </div>
+        </div>`;
+      return html;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      // This listener handles changes for all current and future category dropdowns
+      document.body.addEventListener('change', function(event) {
+        if (event.target.matches('.category-dropdown')) {
+          handleCategoryChange(event);
+        }
+      });
+    });
+
+    // =================================================================================
+    // CASCADING TAXONOMY LOGIC
+    // =================================================================================
+
+    /**
+     * This is the single entry point for handling a selection on ANY category dropdown.
+     * It is attached via a delegated event listener on the body.
+     */
+    function handleCategoryChange(event) {
+      const selectElement = event.target;
+      const level = parseInt(selectElement.dataset.level, 10);
+      const selectedValue = selectElement.value;
+
+      // --- 1. Clear UI State for subsequent levels ---
+      let nextLevel = level + 1;
+      let nextDropdown;
+      while (nextDropdown = document.querySelector(`select[data-level='${nextLevel}']`)) {
+        nextDropdown.parentElement.remove(); // Remove the entire form group
+        nextLevel++;
+      }
+
+      // If the user de-selected an option (chose 'Select...'), we're done.
+      if (!selectedValue) {
+        return;
+      }
+
+      // --- 2. Determine Current State ---
+      // Re-build the current category path from the values of all active dropdowns.
+      const pathParts = [];
+      for (let i = 1; i <= level; i++) {
+        const dropdown = document.querySelector(`select[data-level='${i}']`);
+        if (dropdown && dropdown.value) {
+          pathParts.push(dropdown.value);
+        }
+      }
+      const fullPath = pathParts.join('/');
+      console.log(`Current Path: ${fullPath}`);
+
+      // --- 3. Decide Action: Create Next Dropdown or Populate Form ---
+      // Traverse the category tree to find the node for the currently selected path.
+      let subcategoriesToShow = actionItemOptions.actionItems.categories;
+      for (const part of pathParts) {
+        if (subcategoriesToShow && subcategoriesToShow[part]) {
+          // Move into the subcategories of the selected part for the next iteration/level.
+          subcategoriesToShow = subcategoriesToShow[part].subcategories;
+        } else {
+          // If at any point the path is broken, nullify and exit.
+          subcategoriesToShow = null;
+          break;
+        }
+      }
+
+      if (subcategoriesToShow && Object.keys(subcategoriesToShow).length > 0) {
+        // A. It's an intermediate category. Create the next dropdown.
+        console.log('Intermediate category selected. Creating next dropdown with options:', subcategoriesToShow);
+        createCategoryDropdown(level + 1, subcategoriesToShow);
+      } else {
+        // B. It's a final template. Populate the form fields.
+        console.log('Final template selected. Attempting to populate form for path:', fullPath);
+        const templateData = actionItemOptions.actionItems.optionsData[fullPath];
+        if (templateData) {
+          useTemplate(templateData);
+        } else {
+          console.error('Data Error: No template data found for the final path:', fullPath);
+          alert('Could not find template data for ' + fullPath);
+        }
+      }
+    }
+
+    /**
+     * Creates and appends a new category dropdown to the container.
+     */
+    function createCategoryDropdown(level, options) {
+      const container = document.getElementById('dynamic-category-container');
+      const select = document.createElement('select');
+      select.className = 'form-control category-dropdown';
+      select.dataset.level = level;
+
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = `Select...`;
+      select.appendChild(defaultOption);
+
+      for (const key in options) {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = options[key].displayName || key;
+        select.appendChild(option);
+      }
+
+      const formGroup = document.createElement('div');
+      formGroup.className = 'form-group';
+      formGroup.appendChild(select);
+      container.appendChild(formGroup);
+    }
+
+    /**
+     * Populates the very first category dropdown (Level 1).
+     * This is called when the modal is opened.
+     */
+    function populateTopLevelCategories() {
+      const categorySelect = document.getElementById('category-level-1');
+      // Clear existing options except the first 'Select...' one
+      while (categorySelect.options.length > 1) {
+        categorySelect.remove(1);
+      }
+
+      const categories = actionItemOptions.actionItems.categories;
+      if (!categories || Object.keys(categories).length === 0) {
+        console.error('No categories available to populate dropdown.');
+        categorySelect.disabled = true;
+        return;
+      }
+
+      for (const categoryKey in categories) {
+        const category = categories[categoryKey];
+        const option = document.createElement('option');
+        option.value = categoryKey;
+        option.textContent = category.displayName || categoryKey;
+        categorySelect.appendChild(option);
+      }
+      categorySelect.disabled = false;
+    }
+  </script>
