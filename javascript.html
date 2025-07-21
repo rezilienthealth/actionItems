@@ -816,9 +816,6 @@
         case 'edit':
           editActionItem(itemId);
           break;
-        case 'view':
-          viewActionItem(itemId);
-          break;
         case 'complete':
           completeActionItem(itemId);
           break;
@@ -909,10 +906,49 @@
         dynamicContent.innerHTML = '';
       }
       
-      // Create action item details section (read-only) - more compact
+      // Create compact action item details section for comments modal
       const detailsHtml = `
-        <div class="action-item-details">
-          <h3>${item.title || 'No title'}</h3>
+        <div class="action-item-details compact-details">
+          <div class="details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Title:</span>
+              <span class="detail-value">${item.title || 'Untitled'}</span>
+            </div>
+            ${item.description ? `
+            <div class="detail-item">
+              <span class="detail-label">Desc:</span>
+              <span class="detail-value">${item.description}</span>
+            </div>` : ''}
+            <div class="detail-item">
+              <span class="detail-label">Assigned:</span>
+              <span class="detail-value">${item.assignedTo || 'Unassigned'}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Due:</span>
+              <span class="detail-value">${item.dueDate ? formatDate(item.dueDate) : 'Not set'}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Priority:</span>
+              <span class="detail-value">${item.priority || 'Not set'}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Status:</span>
+              <span class="detail-value">${item.status || 'Open'}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Category:</span>
+              <span class="detail-value">${item.categoryPath || 'No category'}</span>
+            </div>
+            ${item.mentionedUsers ? `
+            <div class="detail-item">
+              <span class="detail-label">Mentions:</span>
+              <span class="detail-value">${Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers}</span>
+            </div>` : ''}
+            <div class="detail-item">
+              <span class="detail-label">Created:</span>
+              <span class="detail-value">${item.createdBy || 'System'} • ${item.createdAt ? formatDate(item.createdAt) : 'Unknown'}</span>
+            </div>
+          </div>
         </div>
         <!-- Comments container will be populated by renderComments() -->
         <div id="comments-container" class="comments-list">
@@ -1550,7 +1586,7 @@
               <div class="activity-header">
                 <span class="activity-author">${author}</span>
                 <span class="activity-description">${activityDescription}</span>
-                <span class="activity-item-title" onclick="viewActionItem('${activity.actionItemId}')">${actionItemTitle}</span>
+                <span class="activity-item-title" onclick="openCommentsModal('${activity.actionItemId}')">${actionItemTitle}</span>
                 <span class="activity-timestamp" title="${timestamp}">${timeAgo}</span>
               </div>
               ${processedContent ? `<div class="activity-text">${processedContent}</div>` : ''}
@@ -1616,102 +1652,7 @@
     }
     
     // View action item details in a read-only modal
-    function viewActionItem(itemId) {
-      const item = actionItems.find(i => i.actionItemId === itemId);
-      if (!item) {
-        console.error('Action item not found for viewing:', itemId);
-        return;
-      }
 
-      // Create modal HTML
-      const modalContent = `
-        <div class="modal-content">
-          <div class="modal-header">
-            <h2>View Action Item</h2>
-            <span class="close-btn" onclick="closeModal()">&times;</span>
-          </div>
-          <div class="modal-body">
-            <div class="form-group">
-              <label>Title</label>
-              <div class="readonly-field">${item.title || ''}</div>
-            </div>
-            <div class="form-group">
-              <label>Description</label>
-              <div class="readonly-field">${item.description || ''}</div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Assigned To</label>
-                <div class="readonly-field">${item.assignedTo || 'Unassigned'}</div>
-              </div>
-              <div class="form-group">
-                <label>Due Date</label>
-                <div class="readonly-field">${item.dueDate ? formatDate(item.dueDate) : 'Not set'}</div>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Priority</label>
-                <div class="readonly-field">${item.priority || 'Not set'}</div>
-              </div>
-              <div class="form-group">
-                <label>Status</label>
-                <div class="readonly-field">${item.status || 'Open'}</div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Category</label>
-              <div class="readonly-field">${item.categoryPath || 'No category'}</div>
-            </div>
-            ${item.mentionedUsers ? `
-              <div class="form-group">
-                <label>Mentions</label>
-                <div class="readonly-field">${Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers}</div>
-              </div>
-            ` : ''}
-            <div class="form-group">
-              <label>Created By</label>
-              <div class="readonly-field">${item.createdBy || 'System'}</div>
-            </div>
-            <div class="form-group">
-              <label>Created At</label>
-              <div class="readonly-field">${item.createdAt ? formatDate(item.createdAt) : 'Unknown'}</div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="action-btn" onclick="closeModal()">Close</button>
-            ${item.status !== 'Completed' ? `
-              <button class="action-btn success" onclick="completeActionItem('${item.actionItemId}')">Mark Complete</button>
-            ` : ''}
-            ${!item.assignedTo || item.assignedTo === '' ? `
-              <button class="action-btn secondary" onclick="selfAssignItem('${item.actionItemId}')">Self-Assign</button>
-            ` : ''}
-            <button class="action-btn" onclick="openCommentsModal('${item.actionItemId}')">View Comments</button>
-          </div>
-        </div>
-      `;
-
-      // Create and show modal
-      const modal = document.createElement('div');
-      modal.className = 'modal';
-      modal.id = 'view-action-item-modal';
-      modal.innerHTML = modalContent;
-      document.body.appendChild(modal);
-      
-      // Show modal
-      modal.style.display = 'block';
-      
-      // Close modal when clicking outside content
-      modal.addEventListener('click', function(event) {
-        if (event.target === modal) {
-          closeModal();
-        }
-      });
-      
-      // Add to global modals array for cleanup
-      window.activeModals = window.activeModals || [];
-      window.activeModals.push(modal);
-    }
     
     // Clear activity feed filters
     function clearActivityFeedFilters() {
@@ -1792,8 +1733,6 @@
             ` : ''}
             ${item.status !== 'Completed' ? `<button class="action-btn success" data-action="complete">Complete</button>` : ''}
             ${!item.assignedTo || item.assignedTo === '' ? `<button class="action-btn secondary" data-action="self-assign">Self-Assign</button>` : ''}
-            <button class="action-btn" data-action="comments">Comments</button>
-            <button class="action-btn" data-action="view">View</button>
           </div>
         </div>
       `;
