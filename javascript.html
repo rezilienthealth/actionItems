@@ -339,7 +339,7 @@
         if (item.categoryPath) {
           // Only get the first level (e.g., "Imaging" from "Imaging/X-ray/Ankle")
           const pathParts = item.categoryPath.split('/');
-          const level1Category = pathParts[0]?.trim();
+          const level1Category = pathParts[0] ? pathParts[0].trim() : '';
           if (level1Category) {
             categories.add(level1Category);
           }
@@ -373,41 +373,87 @@
     
     // Load action items
     function loadActionItems() {
+      console.log('loadActionItems: Starting to load action items...');
       showSpinner('Loading action items...');
       
-      google.script.run
-        .withSuccessHandler(function(items) {
-          console.log('ITEMS RECEIVED FROM SERVER:', items);
-          console.log('ITEMS TYPE:', typeof items);
-          console.log('ITEMS COUNT:', items ? items.length : 0);
-          
-          // Debug: Log each item's key fields
-          if (items && items.length > 0) {
-            items.forEach((item, index) => {
-              console.log(`Item ${index}:`, {
-                id: item.actionItemId,
-                title: item.title,
-                priority: item.priority,
-                status: item.status,
-                assignedTo: item.assignedTo,
-                categoryPath: item.categoryPath
+      try {
+        console.log('loadActionItems: Calling getAndProcessClientActionItems...');
+        google.script.run
+          .withSuccessHandler(function(items) {
+            console.log('loadActionItems: Successfully received items from server');
+            console.log('ITEMS RECEIVED FROM SERVER:', items);
+            console.log('ITEMS TYPE:', typeof items);
+            console.log('ITEMS COUNT:', items ? items.length : 0);
+            
+            if (!items) {
+              console.error('loadActionItems: Received null or undefined items from server');
+              actionItems = [];
+              renderActionItems();
+              hideSpinner();
+              return;
+            }
+            
+            if (!Array.isArray(items)) {
+              console.error('loadActionItems: Items is not an array:', items);
+              items = [];
+            }
+            
+            // Debug: Log each item's key fields
+            if (items.length > 0) {
+              console.log('loadActionItems: Processing', items.length, 'items');
+              items.forEach((item, index) => {
+                console.log(`Item ${index}:`, {
+                  id: item.actionItemId,
+                  title: item.title,
+                  priority: item.priority,
+                  status: item.status,
+                  assignedTo: item.assignedTo,
+                  categoryPath: item.categoryPath
+                });
               });
-            });
-          }
-          
-          actionItems = items;
-          populateAssignmentFilter(); // Populate assignment filter with actual users
-          populateCreatedByFilter(); // Populate created-by filter with actual creators
-          populateCategoryFilter(); // Populate category filter after loading items
-          renderActionItems();
-          hideSpinner();
-        })
-        .withFailureHandler(function(error) {
-          console.error('Error loading action items:', error);
-          hideSpinner();
-          alert('Error loading action items: ' + error);
-        })
-        .getAndProcessClientActionItems();
+            } else {
+              console.log('loadActionItems: No items returned from server');
+            }
+            
+            console.log('loadActionItems: Updating actionItems and rendering...');
+            actionItems = items || [];
+            
+            try {
+              console.log('loadActionItems: Populating filters...');
+              populateAssignmentFilter();
+              populateCreatedByFilter();
+              populateCategoryFilter();
+              console.log('loadActionItems: Rendering action items...');
+              renderActionItems();
+            } catch (renderError) {
+              console.error('Error in render pipeline:', renderError);
+              console.error('Stack:', renderError.stack);
+              alert('Error rendering items: ' + renderError.message);
+            }
+            
+            hideSpinner();
+            console.log('loadActionItems: Completed successfully');
+          })
+          .withFailureHandler(function(error) {
+            console.error('loadActionItems: Error loading action items:', error);
+            console.error('Error stack:', error.stack);
+            actionItems = [];
+            try {
+              renderActionItems();
+            } catch (e) {
+              console.error('Error in render after failure:', e);
+            }
+            hideSpinner();
+            alert('Error loading action items. Please check console for details.');
+          })
+          .getAndProcessClientActionItems();
+      } catch (e) {
+        console.error('FATAL ERROR in loadActionItems:', e);
+        console.error('Stack:', e.stack);
+        actionItems = [];
+        hideSpinner();
+        alert('A critical error occurred while loading items. Please refresh the page.');
+      }
     }
     
     // editActionItem function moved to line 891 - this duplicate removed
@@ -651,7 +697,8 @@
         if (categoryFilter !== 'all') {
           const beforeCount = filteredItems.length;
           filteredItems = filteredItems.filter(item => {
-            const level1Category = item.categoryPath ? item.categoryPath.split('/')[0]?.trim() : '';
+            const firstCategoryPart = item.categoryPath ? item.categoryPath.split('/')[0] : '';
+            const level1Category = firstCategoryPart ? firstCategoryPart.trim() : '';
             return level1Category === categoryFilter;
           });
           console.log('RENDER: All items - category filter reduced items from', beforeCount, 'to', filteredItems.length);
@@ -706,6 +753,9 @@
       switch (action) {
         case 'edit':
           editActionItem(itemId);
+          break;
+        case 'view':
+          viewActionItem(itemId);
           break;
         case 'complete':
           completeActionItem(itemId);
@@ -1082,6 +1132,104 @@
       }, 500);
     }
     
+    // View action item details in a read-only modal
+    function viewActionItem(itemId) {
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      if (!item) {
+        console.error('Action item not found for viewing:', itemId);
+        return;
+      }
+
+      // Create modal HTML
+      const modalContent = `
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>View Action Item</h2>
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Title</label>
+              <div class="readonly-field">${item.title || ''}</div>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <div class="readonly-field">${item.description || ''}</div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Assigned To</label>
+                <div class="readonly-field">${item.assignedTo || 'Unassigned'}</div>
+              </div>
+              <div class="form-group">
+                <label>Due Date</label>
+                <div class="readonly-field">${item.dueDate ? formatDate(item.dueDate) : 'Not set'}</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Priority</label>
+                <div class="readonly-field">${item.priority || 'Not set'}</div>
+              </div>
+              <div class="form-group">
+                <label>Status</label>
+                <div class="readonly-field">${item.status || 'Open'}</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Category</label>
+              <div class="readonly-field">${item.categoryPath || 'No category'}</div>
+            </div>
+            ${item.mentionedUsers ? `
+              <div class="form-group">
+                <label>Mentions</label>
+                <div class="readonly-field">${Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers}</div>
+              </div>
+            ` : ''}
+            <div class="form-group">
+              <label>Created By</label>
+              <div class="readonly-field">${item.createdBy || 'System'}</div>
+            </div>
+            <div class="form-group">
+              <label>Created At</label>
+              <div class="readonly-field">${item.createdAt ? formatDate(item.createdAt) : 'Unknown'}</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="action-btn" onclick="closeModal()">Close</button>
+            ${item.status !== 'Completed' ? `
+              <button class="action-btn success" onclick="completeActionItem('${item.actionItemId}')">Mark Complete</button>
+            ` : ''}
+            ${!item.assignedTo || item.assignedTo === '' ? `
+              <button class="action-btn secondary" onclick="selfAssignItem('${item.actionItemId}')">Self-Assign</button>
+            ` : ''}
+            <button class="action-btn" onclick="openCommentsModal('${item.actionItemId}')">View Comments</button>
+          </div>
+        </div>
+      `;
+
+      // Create and show modal
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+      modal.id = 'view-action-item-modal';
+      modal.innerHTML = modalContent;
+      document.body.appendChild(modal);
+      
+      // Show modal
+      modal.style.display = 'block';
+      
+      // Close modal when clicking outside content
+      modal.addEventListener('click', function(event) {
+        if (event.target === modal) {
+          closeModal();
+        }
+      });
+      
+      // Add to global modals array for cleanup
+      window.activeModals = window.activeModals || [];
+      window.activeModals.push(modal);
+    }
+    
     // Clear activity feed filters
     function clearActivityFeedFilters() {
       document.getElementById('feed-filter-type').value = 'all';
@@ -1155,11 +1303,14 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="action-btn primary" data-action="edit">Edit</button>
+            ${item.createdBy === getCurrentUserEmail() ? `
+              <button class="action-btn primary" data-action="edit">Edit</button>
+              <button class="action-btn danger" data-action="delete">Delete</button>
+            ` : ''}
             ${item.status !== 'Completed' ? `<button class="action-btn success" data-action="complete">Complete</button>` : ''}
             ${!item.assignedTo || item.assignedTo === '' ? `<button class="action-btn secondary" data-action="self-assign">Self-Assign</button>` : ''}
             <button class="action-btn" data-action="comments">Comments</button>
-            <button class="action-btn danger" data-action="delete">Delete</button>
+            <button class="action-btn" data-action="view">View</button>
           </div>
         </div>
       `;
@@ -1346,8 +1497,8 @@
       document.getElementById('item-mentions').value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : (item.mentionedUsers || '');
       document.getElementById('item-tags').value = item.tags ? item.tags.join(', ') : '';
 
-      // Update category options based on item type
-      updateCategoryOptions();
+      // Initialize category dropdowns
+      populateTopLevelCategories();
 
       // If item has category path, set the appropriate selections
       if (item.categoryPath) {
@@ -1882,7 +2033,7 @@
     // Navigation helpers
     function selectNextMention(items, selected) {
       if (!selected) {
-        items[0]?.classList.add('selected');
+        if (items[0]) items[0].classList.add('selected');
       } else {
         selected.classList.remove('selected');
         const next = selected.nextElementSibling || items[0];
@@ -1892,7 +2043,7 @@
     
     function selectPrevMention(items, selected) {
       if (!selected) {
-        items[items.length - 1]?.classList.add('selected');
+        if (items.length > 0) items[items.length - 1].classList.add('selected');
       } else {
         selected.classList.remove('selected');
         const prev = selected.previousElementSibling || items[items.length - 1];
@@ -2272,7 +2423,8 @@ function applyAdvancedFilters() {
         
         // Category filter (Level 1 only)
         if (categoryFilter !== 'all') {
-          const level1Category = itemData.categoryPath ? itemData.categoryPath.split('/')[0]?.trim() : '';
+          const firstCategoryPart = itemData.categoryPath ? itemData.categoryPath.split('/')[0] : '';
+          const level1Category = firstCategoryPart ? firstCategoryPart.trim() : '';
           show = show && (level1Category === categoryFilter);
         }
         
@@ -2295,15 +2447,20 @@ function applyAdvancedFilters() {
     
     // Helper function to extract item data from DOM element
     function getItemDataFromElement(itemElement) {
+      const getTextContent = (selector) => {
+        const el = itemElement.querySelector(selector);
+        return el ? el.textContent : '';
+      };
+      
       return {
-        actionItemId: itemElement.dataset.itemId,
-        title: itemElement.querySelector('.item-title')?.textContent || '',
-        description: itemElement.querySelector('.item-description')?.textContent || '',
-        status: itemElement.querySelector('.item-status')?.textContent || '',
-        priority: itemElement.querySelector('.item-priority')?.textContent || '',
-        assignedTo: itemElement.querySelector('.item-assignee')?.textContent || '',
-        dueDate: itemElement.querySelector('.item-due-date')?.textContent || '',
-        categoryPath: itemElement.querySelector('.item-category')?.textContent || ''
+        id: itemElement.dataset.id || '',
+        title: getTextContent('.item-title'),
+        description: getTextContent('.item-description'),
+        status: getTextContent('.item-status'),
+        priority: getTextContent('.item-priority'),
+        assignedTo: getTextContent('.item-assignee'),
+        dueDate: getTextContent('.item-due-date'),
+        categoryPath: getTextContent('.item-category')
       };
     }
     
@@ -3197,41 +3354,64 @@ function applyAdvancedFilters() {
     
     // Initialize admin functionality
     function initAdmin() {
+      // First, check if the admin and template tabs exist
+      const adminTabButton = document.getElementById('admin-tab');
+      const templatesTabButton = document.getElementById('templates-tab');
+      
+      if (!adminTabButton || !templatesTabButton) {
+        console.warn('Tab buttons not found in the DOM');
+        return;
+      }
+      
+      // Hide admin and template tabs by default until we verify access
+      adminTabButton.style.display = 'none';
+      templatesTabButton.style.display = 'none';
+      
+      // Check if user has admin access
       google.script.run
         .withSuccessHandler(function(isAdminUser) {
           console.log('Admin check result:', isAdminUser);
           if (isAdminUser) {
-            // Show the admin tab button
-            const adminTabButton = document.getElementById('admin-tab');
-            if (adminTabButton) {
-              adminTabButton.style.display = 'block';
-              console.log('Admin tab button shown');
-            }
+            // Show the admin and template tab buttons for admin users
+            adminTabButton.style.display = 'block';
+            templatesTabButton.style.display = 'block';
+            console.log('Admin and template tabs shown');
             
             // Load admin data when admin access is confirmed
             setTimeout(() => {
               loadUsers();
               loadGroups();
             }, 100);
+          } else {
+            // Ensure tabs are hidden for non-admin users
+            adminTabButton.style.display = 'none';
+            templatesTabButton.style.display = 'none';
+            console.log('User does not have admin access - hiding admin and template tabs');
           }
         })
         .withFailureHandler(function(error) {
           console.error('Error checking admin status:', error);
+          // Keep admin tab hidden on error
+          adminTabButton.style.display = 'none';
         })
         .isAdmin();
         
       // Set up event listeners for admin buttons
-      document.getElementById('add-user-btn')?.addEventListener('click', function() {
+      const addUserBtn = document.getElementById('add-user-btn');
+      if (addUserBtn) addUserBtn.addEventListener('click', function() {
         showUserModal(false);
       });
       
-      document.getElementById('refresh-users-btn')?.addEventListener('click', loadUsers);
+      const refreshUsersBtn = document.getElementById('refresh-users-btn');
+      if (refreshUsersBtn) refreshUsersBtn.addEventListener('click', loadUsers);
       
-      document.getElementById('add-group-btn')?.addEventListener('click', function() {
+      const addGroupBtn = document.getElementById('add-group-btn');
+      if (addGroupBtn) addGroupBtn.addEventListener('click', function() {
         showGroupModal(false);
       });
       
-      document.getElementById('refresh-groups-btn')?.addEventListener('click', loadGroups);
+      const refreshGroupsBtn = document.getElementById('refresh-groups-btn');
+      if (refreshGroupsBtn) refreshGroupsBtn.addEventListener('click', loadGroups);
       
       // Webhook test button
       console.log('Initializing webhook test button...');
@@ -3287,7 +3467,8 @@ function applyAdvancedFilters() {
         showToast('Could not find webhook test button', 'error');
       }
       
-      document.getElementById('refresh-webhook-btn')?.addEventListener('click', function() {
+      const refreshWebhookBtn = document.getElementById('refresh-webhook-btn');
+      if (refreshWebhookBtn) refreshWebhookBtn.addEventListener('click', function() {
         loadUsers();
         showToast('Users refreshed', 'success');
       });
@@ -3303,7 +3484,8 @@ function applyAdvancedFilters() {
         console.error('User form not found');
       }
       
-      document.getElementById('group-form')?.addEventListener('submit', function(e) {
+      const groupForm = document.getElementById('group-form');
+      if (groupForm) groupForm.addEventListener('submit', function(e) {
         e.preventDefault();
         saveGroup();
       });
@@ -3322,8 +3504,10 @@ function applyAdvancedFilters() {
         }
       });
       
-      document.getElementById('add-membership-btn')?.addEventListener('click', showAddMembershipModal);
-      document.getElementById('refresh-memberships-btn')?.addEventListener('click', loadMemberships);
+      const addMembershipBtn = document.getElementById('add-membership-btn');
+      if (addMembershipBtn) addMembershipBtn.addEventListener('click', showAddMembershipModal);
+      const refreshMembershipsBtn = document.getElementById('refresh-memberships-btn');
+      if (refreshMembershipsBtn) refreshMembershipsBtn.addEventListener('click', loadMemberships);
     }
     
     // Show webhook test UI
@@ -3482,8 +3666,16 @@ function applyAdvancedFilters() {
         })
         .withFailureHandler(function(error) {
           console.error('Error loading users:', error);
+          const errorMsg = error.message || 'Unknown error loading users';
+          if (errorMsg.includes('Access denied') || errorMsg.includes('Admin privileges required')) {
+            // Don't show error toast for unauthorized access, just hide the admin tab
+            console.log('User does not have permission to view users');
+            const adminTab = document.getElementById('admin-tab');
+            if (adminTab) adminTab.style.display = 'none';
+          } else {
+            showToast('Error loading users: ' + errorMsg, 'error');
+          }
           hideSpinner();
-          alert('Error loading users: ' + error);
         })
         .getUsers();
     }
@@ -3526,8 +3718,16 @@ function applyAdvancedFilters() {
         })
         .withFailureHandler(function(error) {
           console.error('Error loading groups:', error);
+          const errorMsg = error.message || 'Unknown error loading groups';
+          if (errorMsg.includes('Access denied') || errorMsg.includes('Admin privileges required')) {
+            // Don't show error toast for unauthorized access, just hide the admin tab
+            console.log('User does not have permission to view groups');
+            const adminTab = document.getElementById('admin-tab');
+            if (adminTab) adminTab.style.display = 'none';
+          } else {
+            showToast('Error loading groups: ' + errorMsg, 'error');
+          }
           hideSpinner();
-          alert('Error loading groups: ' + error);
         })
         .getNotificationGroups();
     }
@@ -3820,7 +4020,8 @@ function applyAdvancedFilters() {
       const spinner = document.getElementById('membershipSpinner');
       
       // Clear form and error
-      document.getElementById('addMembershipForm')?.reset();
+      const addMembershipForm = document.getElementById('addMembershipForm');
+      if (addMembershipForm) addMembershipForm.reset();
       errorDiv.classList.add('d-none');
       
       // Show loading state
@@ -3903,8 +4104,10 @@ function applyAdvancedFilters() {
       }
       
       // Set up event listeners
-      saveBtn?.removeEventListener('click', handleSaveMembership);
-      saveBtn?.addEventListener('click', handleSaveMembership);
+      if (saveBtn) {
+        saveBtn.removeEventListener('click', handleSaveMembership);
+        saveBtn.addEventListener('click', handleSaveMembership);
+      }
       
       // Load data and show modal
       Promise.all([

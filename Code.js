@@ -43,24 +43,88 @@ let lastOptionsCacheTime = 0;
  * @returns {HtmlOutput} HTML output
  */
 function doGet(e) {
-  const userEmail = Session.getActiveUser().getEmail();
+  try {
+    // Get user info with detailed error handling
+    let userEmail;
+    try {
+      userEmail = Session.getActiveUser().getEmail();
+      console.log('User email:', userEmail);
+      
+      // Log basic user info for debugging
+      console.log('User timezone:', Session.getScriptTimeZone());
+      console.log('Effective user:', Session.getEffectiveUser().getEmail());
+      
+    } catch (emailError) {
+      console.error('Error getting user email:', emailError);
+      return HtmlService.createHtmlOutput(`
+        <h2>Authentication Error</h2>
+        <p>Could not retrieve your user information. Please ensure you're logged in to Google.</p>
+        <p>Error details: ${emailError.message}</p>
+      `);
+    }
+    
+    if (!userEmail) {
+      return HtmlService.createHtmlOutput(`
+        <h2>Authentication Required</h2>
+        <p>You must be logged in to access this page.</p>
+      `);
+    }
 
-  // Check if the user is authenticated and belongs to the allowed domains
-  if (!userEmail || !ALLOWED_DOMAINS.some(domain => userEmail.endsWith("@" + domain))) {
+    // Check if the user's domain is allowed
+    const userDomain = userEmail.split('@')[1];
+    const isDomainAllowed = ALLOWED_DOMAINS.some(domain => userEmail.endsWith("@" + domain));
+    
+    console.log('User domain:', userDomain);
+    console.log('Allowed domains:', ALLOWED_DOMAINS);
+    
+    if (!isDomainAllowed) {
+      console.warn(`Access denied for domain: ${userDomain}`);
+      return HtmlService.createHtmlOutput(`
+        <h2>Access Denied</h2>
+        <p>Your domain (${userDomain}) is not authorized to access this application.</p>
+        <p>Please contact the administrator if you believe this is an error.</p>
+      `);
+    }
+    
+    // Log successful authentication
+    console.log(`User ${userEmail} authenticated successfully`);
+    
+    // Log the access
+    try {
+      logAuditEvent("Page Access", `User accessed the application`);
+    } catch (logError) {
+      console.error('Error logging audit event:', logError);
+      // Continue even if logging fails
+    }
+
+    // Render the main UI
+    try {
+      const htmlOutput = HtmlService.createTemplateFromFile('index')
+        .evaluate()
+        .setTitle('ActionItems')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      
+      console.log('Successfully rendered UI');
+      return htmlOutput;
+      
+    } catch (renderError) {
+      console.error('Error rendering UI:', renderError);
+      return HtmlService.createHtmlOutput(`
+        <h2>Application Error</h2>
+        <p>An error occurred while rendering the application interface.</p>
+        <p>Error details: ${renderError.message}</p>
+      `);
+    }
+      
+  } catch (error) {
+    console.error('Critical error in doGet:', error);
     return HtmlService.createHtmlOutput(`
-      <h2>Access Denied</h2>
-      <p>You must log in with an authorized account to access this page.</p>
+      <h2>Unexpected Error</h2>
+      <p>An unexpected error occurred while loading the application. Please try again later.</p>
+      <p>${error.toString()}</p>
+      <p>Stack: ${error.stack || 'No stack trace available'}</p>
     `);
   }
-
-  // Log the access
-  logAuditEvent("Page Access");
-
-  // Render the main UI
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('ActionItems')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /**
@@ -152,14 +216,43 @@ function getServerLogs() {
 /**
  * Logs an audit event
  * @param {string} action - The action being performed
+ * @param {string} [details] - Additional details about the event
+ * @returns {boolean} True if the event was logged successfully
  */
-function logAuditEvent(action) {
-  const userEmail = Session.getActiveUser().getEmail();
-  const timestamp = new Date();
-  
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("auditTrail");
-  if (sheet) {
-    sheet.appendRow([timestamp, userEmail, action]);
+function logAuditEvent(action, details = '') {
+  try {
+    const userEmail = Session.getActiveUser().getEmail();
+    const timestamp = new Date();
+    
+    try {
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      if (!ss) {
+        console.warn('Could not open spreadsheet for audit logging');
+        return false;
+      }
+      
+      let sheet = ss.getSheetByName("auditTrail");
+      if (!sheet) {
+        console.warn('Audit trail sheet not found, attempting to create it');
+        sheet = ss.insertSheet("auditTrail");
+        if (sheet) {
+          sheet.appendRow(["Timestamp", "User Email", "Action", "Details"]);
+        }
+      }
+      
+      if (sheet) {
+        sheet.appendRow([timestamp, userEmail, action, details]);
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      console.error('Error writing to audit log:', e);
+      return false;
+    }
+  } catch (e) {
+    console.error('Error in logAuditEvent:', e);
+    return false;
   }
 }
 
@@ -328,22 +421,75 @@ function getUserEmail() {
  * @returns {string} The user's role
  */
 function getUserRole() {
-  const email = getUserEmail();
-  const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
-  const sheet = ss.getSheetByName("authorizedUsers");
-  
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const emailCol = headers.indexOf("email");
-  const roleCol = headers.indexOf("role");
-  
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][emailCol] === email) {
-      return data[i][roleCol];
+  try {
+    const email = Session.getActiveUser().getEmail();
+    console.log('Getting role for user:', email);
+    
+    // First check if user is in the hardcoded admin list
+    const HARDCODED_ADMINS = [
+      'leohsu@rezilienthealth.com',
+      'clinicalinnovation@rezilienthealth.com' // Temporary addition for testing
+    ];
+    
+    if (HARDCODED_ADMINS.includes(email.toLowerCase())) {
+      console.log('User is in hardcoded admin list, returning admin role');
+      return 'admin';
     }
+    
+    // Try to get role from the authorized users sheet if accessible
+    try {
+      console.log('Attempting to access user spreadsheet:', USER_SPREADSHEET_ID);
+      const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
+      console.log('Successfully opened spreadsheet');
+      
+      const sheet = ss.getSheetByName("authorizedUsers");
+      if (!sheet) {
+        console.warn('Authorized users sheet not found, using default role');
+        return 'user';
+      }
+      
+      console.log('Reading data from authorized users sheet');
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      const emailCol = headers.indexOf("email");
+      const roleCol = headers.indexOf("role");
+      
+      console.log('Headers:', headers);
+      console.log('Email column index:', emailCol);
+      console.log('Role column index:', roleCol);
+      
+      if (emailCol === -1 || roleCol === -1) {
+        console.warn('Required columns not found in authorized users sheet');
+        return 'user';
+      }
+      
+      console.log('Searching for user in', data.length - 1, 'rows');
+      for (let i = 1; i < data.length; i++) {
+        const rowEmail = data[i][emailCol] ? data[i][emailCol].toString().toLowerCase() : '';
+        console.log(`Row ${i}: Email: ${rowEmail}, Role: ${data[i][roleCol]}`);
+        
+        if (rowEmail === email.toLowerCase()) {
+          const roleData = data[i][roleCol];
+          const role = roleData ? roleData.toString().toLowerCase() : 'user';
+          console.log('Found matching user with role:', role);
+          return VALID_ROLES.includes(role) ? role : 'user';
+        }
+      }
+      
+      console.log('User not found in authorized users sheet');
+    } catch (e) {
+      console.error('Error accessing authorized users sheet:', e.toString());
+      console.error('Stack trace:', e.stack);
+      // Continue with default role if we can't access the sheet
+    }
+    
+    console.log('Returning default user role');
+    return 'user';
+  } catch (e) {
+    console.error('Error in getUserRole:', e.toString());
+    console.error('Stack trace:', e.stack);
+    return 'user'; // Default to most restrictive role on error
   }
-  
-  return "user"; // Default role
 }
 
 /**
@@ -361,6 +507,18 @@ function isProvider() {
  */
 function isAdmin() {
   return getUserRole() === "admin";
+}
+
+/**
+ * Verifies that the current user has admin access
+ * @throws {Error} If the user is not an admin
+ */
+function verifyAdminAccess() {
+  if (!isAdmin()) {
+    const email = Session.getActiveUser().getEmail();
+    console.warn(`Unauthorized admin access attempt by ${email}`);
+    throw new Error('Access denied: Admin privileges required');
+  }
 }
 
 /**
@@ -841,6 +999,9 @@ function getCommentsForActionItem(itemId) {
  * @returns {Object} Result of the operation
  */
 function deleteUser(email) {
+  // Verify admin access
+  verifyAdminAccess();
+  
   try {
     if (!email) {
       throw new Error('Email/Group ID is required');
@@ -904,6 +1065,9 @@ function deleteUser(email) {
  * @returns {Object} Result of the operation
  */
 function saveUser(user) {
+  // Verify admin access
+  verifyAdminAccess();
+  
   console.log('saveUser called with user:', JSON.stringify(user, null, 2));
   
   try {
@@ -972,8 +1136,14 @@ function saveUser(user) {
           console.log(`Setting email header '${header}' to:`, emailValue);
           userData.push(emailValue);
         }
-        else if (header === 'firstName') userData.push(user.firstName || user.name?.split(' ')[0] || '');
-        else if (header === 'lastName') userData.push(user.lastName || user.name?.split(' ').slice(1).join(' ') || '');
+        else if (header === 'firstName') {
+          const firstName = user.firstName || (user.name ? user.name.split(' ')[0] : '') || '';
+          userData.push(firstName);
+        }
+        else if (header === 'lastName') {
+          const lastName = user.lastName || (user.name ? user.name.split(' ').slice(1).join(' ') : '') || '';
+          userData.push(lastName);
+        }
         else if (header === 'displayName') userData.push(displayName);
         else if (header === 'role') userData.push((user.role || 'user').toLowerCase());
         else if (header === 'webhookUrl' || header === 'chatwebhook') {
@@ -1019,74 +1189,14 @@ function saveUser(user) {
 }
 
 /**
-    console.log('Deleting user/group:', email);
-    
-    if (!email) {
-      throw new Error('Email/Group ID is required');
-    }
-    
-    const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    
-    if (!sheet) {
-      throw new Error('Users sheet not found');
-    }
-    
-    // Get all data
-    const range = sheet.getDataRange();
-    const values = range.getValues();
-    const headers = values[0];
-    
-    // Find email/groupId column
-    const emailCol = headers.indexOf('email');
-    const groupIdCol = headers.indexOf('groupId');
-    
-    if (emailCol === -1 && groupIdCol === -1) {
-      throw new Error('No identifier columns found in users sheet');
-    }
-    
-    // Find user/group row
-    let rowIndex = -1;
-    for (let i = 1; i < values.length; i++) {
-      if ((emailCol !== -1 && values[i][emailCol] === email) || 
-          (groupIdCol !== -1 && values[i][groupIdCol] === email)) {
-        rowIndex = i;
-        break;
-      }
-    }
-    
-    if (rowIndex === -1) {
-      throw new Error('User/Group not found: ' + email);
-    }
-    
-    // If this is a group, remove it from all members
-    if (values[rowIndex][headers.indexOf('isGroup')] === true) {
-      updateGroupMembers(email, []); // Remove all members
-    }
-    
-    // Delete the row
-    sheet.deleteRow(rowIndex + 1); // +1 because sheet rows are 1-based
-    
-    console.log('User/Group deleted successfully');
-    return { success: true, message: 'User/Group deleted successfully' };
-    
-  } catch (error) {
-    console.error('Error deleting user/group:', error);
-    Logger.log('ERROR in deleteUser: ' + error.toString());
-    throw error;
-  }
-}
-
-/**
- * Gets users and groups for the system
- * @returns {Array} Array of users and groups
- */
-/**
  * Gets a single user by email
  * @param {string} email - The email of the user to find
  * @returns {Object} The user object or null if not found
  */
 function getUserByEmail(email) {
+  // Verify admin access
+  verifyAdminAccess();
+  
   try {
     if (!email) {
       throw new Error('Email is required');
@@ -1127,6 +1237,9 @@ function getUserByEmail(email) {
  * @returns {Array} Array of user and group objects
  */
 function getUsers() {
+  // Verify admin access
+  verifyAdminAccess();
+  
   try {
     const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
     const userSheet = ss.getSheetByName(SHEET_NAMES.USERS);

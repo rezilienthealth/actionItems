@@ -418,8 +418,11 @@ async function sendMentionNotifications(mentions, actionItem, comment = null) {
   const sessionId = Utilities.getUuid().substring(0, 8);
   
   console.log(`=== SEND MENTION NOTIFICATIONS [${sessionId}] START ===`);
-  console.log(`Action Item: ${actionItem?.actionItemId} - ${actionItem?.title?.substring(0, 50)}...`);
-  console.log(`Mentions: ${mentions?.length || 0} users`);
+  const actionItemId = actionItem && actionItem.actionItemId ? actionItem.actionItemId : 'unknown';
+  const titleSnippet = actionItem && actionItem.title ? actionItem.title.substring(0, 50) : 'No title';
+  console.log(`Action Item: ${actionItemId} - ${titleSnippet}...`);
+  const mentionsCount = mentions && Array.isArray(mentions) ? mentions.length : 0;
+  console.log(`Mentions: ${mentionsCount} users`);
   console.log('Action Item Data:', JSON.stringify(actionItem, null, 2));
   console.log('Comment Data:', comment ? JSON.stringify(comment, null, 2) : 'No comment');
   
@@ -438,7 +441,8 @@ async function sendMentionNotifications(mentions, actionItem, comment = null) {
     
     console.log(`Normalized ${mentions.length} mentions to ${normalizedMentions.length} unique emails`);
     
-    const userEmail = getUserEmail()?.toLowerCase()?.trim() || 'unknown';
+    const userEmailRaw = getUserEmail();
+    const userEmail = userEmailRaw ? userEmailRaw.toLowerCase().trim() : 'unknown';
     console.log(`Current user: ${userEmail}`);
     
     // Load user data with timeout
@@ -498,7 +502,7 @@ async function sendMentionNotifications(mentions, actionItem, comment = null) {
           
           // Prepare notification content with action item details
           const actionItemTitle = actionItem.title || 'Untitled Action Item';
-          const commentContent = comment?.content || '';
+          const commentContent = comment && comment.content ? comment.content : '';
           // Use getActionItemUrl to get the direct URL to the action item
           const viewUrl = getActionItemUrl(actionItem.actionItemId);
           
@@ -680,7 +684,7 @@ function sendWebhookNotification(user, message, email) {
   console.log(`[${requestId}] Starting webhook notification for ${email}`);
   
   return new Promise(resolve => {
-    if (!user?.webhookUrl) {
+    if (!user || !user.webhookUrl) {
       const errorMsg = `ℹ️ [${requestId}] No webhook configured for ${email}`;
       console.log(errorMsg);
       return resolve({ 
