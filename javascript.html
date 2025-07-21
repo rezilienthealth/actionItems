@@ -167,12 +167,23 @@
       }
     }
     
+    // Global helper function to safely add event listeners
+    function safeAddEventListener(selector, event, handler) {
+      const element = typeof selector === 'string' ? document.getElementById(selector) : selector;
+      if (element) {
+        element.addEventListener(event, handler);
+        return true;
+      }
+      return false;
+    }
+
     // Initialize event listeners
     function initEventListeners() {
-      // New action item buttons
-      document.getElementById('new-item-btn').addEventListener('click', openNewItemModal);
-      document.getElementById('new-item-btn-all').addEventListener('click', openNewItemModal);
-      document.getElementById('new-template-btn').addEventListener('click', openNewTemplateModal);
+
+      // New action item buttons - only add if elements exist
+      safeAddEventListener('new-item-btn', 'click', openNewItemModal);
+      safeAddEventListener('new-item-btn-all', 'click', openNewItemModal);
+      safeAddEventListener('new-template-btn', 'click', openNewTemplateModal);
       
       // Add debug button for viewing logs
       const debugButton = document.createElement('button');
@@ -182,63 +193,70 @@
       debugButton.style.right = '10px';
       
       // My Items filter listeners
-      document.getElementById('assignment-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('created-by-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('status-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('priority-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('due-date-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('category-filter').addEventListener('change', applyAdvancedFilters);
-      document.getElementById('search-input').addEventListener('input', applyAdvancedFilters);
-      document.getElementById('clear-filters-btn').addEventListener('click', clearAllFilters);
+      safeAddEventListener('assignment-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('created-by-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('status-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('priority-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('due-date-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('category-filter', 'change', applyAdvancedFilters);
+      safeAddEventListener('search-input', 'input', applyAdvancedFilters);
+      safeAddEventListener('clear-filters-btn', 'click', clearAllFilters);
       
       // All Items filter listeners
-      document.getElementById('assignment-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('created-by-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('status-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('priority-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('due-date-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('category-filter-all').addEventListener('change', renderActionItems);
-      document.getElementById('search-input-all').addEventListener('input', renderActionItems);
-      document.getElementById('clear-filters-btn-all').addEventListener('click', clearAllFiltersAll);
+      safeAddEventListener('assignment-filter-all', 'change', renderActionItems);
+      safeAddEventListener('created-by-filter-all', 'change', renderActionItems);
+      safeAddEventListener('status-filter-all', 'change', renderActionItems);
+      safeAddEventListener('priority-filter-all', 'change', renderActionItems);
+      safeAddEventListener('due-date-filter-all', 'change', renderActionItems);
+      safeAddEventListener('category-filter-all', 'change', renderActionItems);
+      safeAddEventListener('search-input-all', 'input', renderActionItems);
+      safeAddEventListener('clear-filters-btn-all', 'click', clearAllFiltersAll);
       
       // Add comment button
-      document.getElementById('add-comment-btn').addEventListener('click', addComment);
+      safeAddEventListener('add-comment-btn', 'click', addComment);
       
       // Activity feed event listeners
-      document.getElementById('refresh-feed-btn').addEventListener('click', loadActivityFeed);
-      document.getElementById('clear-feed-filters-btn').addEventListener('click', clearActivityFeedFilters);
+      safeAddEventListener('refresh-feed-btn', 'click', loadActivityFeed);
+      safeAddEventListener('clear-feed-filters-btn', 'click', clearActivityFeedFilters);
       
       // Activity feed filter change listeners
-      document.getElementById('feed-filter-type').addEventListener('change', loadActivityFeed);
-      document.getElementById('feed-filter-timeframe').addEventListener('change', loadActivityFeed);
-      document.getElementById('feed-search').addEventListener('input', debounce(loadActivityFeed, 500));
+      safeAddEventListener('feed-filter-type', 'change', loadActivityFeed);
+      safeAddEventListener('feed-filter-user', 'change', loadActivityFeed);
+      safeAddEventListener('feed-filter-date', 'change', loadActivityFeed);
+      
+      // Comment submission
+      const commentInput = document.getElementById('comment-input');
+      if (commentInput) {
+        commentInput.addEventListener('keydown', handleCommentKeyDown);
+      }
+      
+      // Close modals when clicking the X button
+      document.querySelectorAll('.close').forEach(button => {
+        button.addEventListener('click', function() {
+          const modal = this.closest('.modal');
+          if (modal) modal.style.display = 'none';
+        });
+      });
+      
+      // Click outside modal to close
+      window.addEventListener('click', function(event) {
+        if (event.target.classList.contains('modal')) {
+          event.target.style.display = 'none';
+        }
+      });
       
       // Event delegation for action item buttons
-      function handleActionItemClick(event) {
-        const target = event.target;
-        if (target.classList.contains('action-btn')) {
-          const card = target.closest('.item-card');
-          if (card) {
-            const itemId = card.dataset.id;
-            const action = target.dataset.action;
-
-            if (action === 'edit') {
-              editActionItem(itemId);
-            } else if (action === 'complete') {
-              completeActionItem(itemId);
-            } else if (action === 'delete') {
-              deleteActionItem(itemId);
-            }
-          }
-        }
+      safeAddEventListener('my-items-container', 'click', handleActionItemClick);
+      safeAddEventListener('all-items-container', 'click', handleActionItemClick);
+      
+      // Initialize mentions autocomplete
+      initializeMentionsOnAllFields();
+      
+      // Initialize admin tab if it exists
+      if (document.getElementById('admin-tab')) {
+        initAdmin();
       }
-
-      document.getElementById('my-items-container').addEventListener('click', handleActionItemClick);
-      document.getElementById('all-items-container').addEventListener('click', handleActionItemClick);
-    }
-    
-    // Filter items
-    function filterItems() {
+      
       renderActionItems();
     }
     
@@ -541,26 +559,62 @@
     // Load action item options from the server
     function loadActionItemOptions(callback) {
       showSpinner('Loading options...');
+      console.log('loadActionItemOptions: Starting to load action item options...');
       
       google.script.run
         .withSuccessHandler(function(options) {
-          console.log('Received actionItemOptions from server:', options);
+          console.log('loadActionItemOptions: Received response from server');
+          
           if (options && options.actionItems) {
             actionItemOptions = options;
-            console.log('Global actionItemOptions set:', actionItemOptions);
+            console.log('loadActionItemOptions: Successfully set actionItemOptions');
+            
+            // Directly populate the category dropdown
+            const categorySelect = document.getElementById('category-level-1');
+            if (categorySelect) {
+              // Clear existing options except the first one
+              while (categorySelect.options.length > 1) {
+                categorySelect.remove(1);
+              }
+              
+              const categories = options.actionItems.categories || {};
+              console.log('Directly populating categories:', Object.keys(categories));
+              
+              // Add each category to the dropdown
+              Object.entries(categories).forEach(([key, category]) => {
+                const displayName = (category && typeof category === 'object' && category.title) || key;
+                if (displayName) {
+                  const option = new Option(displayName, key);
+                  categorySelect.add(option);
+                }
+              });
+              
+              categorySelect.disabled = categorySelect.options.length <= 1;
+              console.log(`Directly added ${categorySelect.options.length - 1} categories`);
+            } else {
+              console.error('Category select element not found');
+            }
           } else {
-            console.error('Invalid options structure received from server:', options);
-            // Initialize with empty structure to prevent errors
-            actionItemOptions = { actionItems: { categories: {}, selectionTypes: {} } };
+            console.warn('loadActionItemOptions: Received incomplete options from server, using empty defaults');
+            actionItemOptions = { 
+              actionItems: { 
+                categories: {}, 
+                selectionTypes: {},
+                optionsData: {}
+              } 
+            };
           }
+          
           hideSpinner();
+          
           // Execute callback if provided
           if (callback) {
+            console.log('loadActionItemOptions: Executing callback');
             callback();
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Error loading action item options:', error);
+          console.error('loadActionItemOptions: Error loading action item options:', error);
           hideSpinner();
           alert('Error loading action item options: ' + error.message);
         })
@@ -728,21 +782,29 @@
         item.addEventListener('click', function(event) {
           if (!event.target.closest('.item-actions') && !event.target.closest('.item-checkbox')) {
             const itemId = this.dataset.itemId;
-            openItemDetails(itemId);
+            openCommentsModal(itemId); // Changed from openItemDetails to openCommentsModal
           }
         });
       });
       
-      // Add click event listeners to action buttons
-      document.querySelectorAll('.action-btn').forEach(button => {
-        button.addEventListener('click', function(event) {
-          event.stopPropagation(); // Prevent item click
-          const action = this.dataset.action;
-          const itemElement = this.closest('.action-item');
-          const itemId = itemElement.dataset.itemId;
-          
-          handleActionItemClick(event, action, itemId);
-        });
+      // Event delegation for action buttons
+      ['my-items-container', 'all-items-container'].forEach(containerId => {
+        const container = document.getElementById(containerId);
+        if (container) {
+          container.addEventListener('click', function(event) {
+            const actionBtn = event.target.closest('.action-btn');
+            if (!actionBtn) return;
+            
+            event.stopPropagation();
+            const action = actionBtn.dataset.action;
+            const itemElement = actionBtn.closest('.action-item');
+            const itemId = itemElement?.dataset?.itemId;
+            
+            if (action && itemId) {
+              handleActionItemClick(event, action, itemId);
+            }
+          });
+        }
       });
     }
     
@@ -814,7 +876,7 @@
         .assignActionItem(itemId, currentUser);
     }
     
-    // Open comments modal and load comments
+    // Open comments modal and load comments with action item details
     function openCommentsModal(itemId) {
       currentActionItemId = itemId;
       const item = actionItems.find(i => i.actionItemId === itemId);
@@ -823,41 +885,70 @@
         return;
       }
       
-      // Update modal title
-      const modalTitle = document.getElementById('modal-title');
-      if (modalTitle) {
-        modalTitle.textContent = `Comments - ${item.title}`;
-      }
-      
       // Show the modal
       const modal = document.getElementById('item-modal');
       if (modal) {
         modal.style.display = 'block';
+        // Ensure modal is scrolled to top when opened
+        modal.scrollTop = 0;
       }
       
-      // Hide the form and show comments section (if they exist)
-      const form = document.getElementById('new-item-form');
+      // Hide the form
+      const form = document.getElementById('item-form');
       if (form) {
         form.style.display = 'none';
       }
       
-      const commentsSection = document.querySelector('.item-details-section');
-      if (commentsSection) {
-        commentsSection.style.display = 'block';
+      // Get or create the dynamic content container
+      let dynamicContent = modal.querySelector('.modal-dynamic-content');
+      if (!dynamicContent) {
+        dynamicContent = document.createElement('div');
+        dynamicContent.className = 'modal-dynamic-content';
+        modal.querySelector('.modal-content').appendChild(dynamicContent);
+      } else {
+        dynamicContent.innerHTML = '';
       }
       
-      // Clear previous comments and new comment field
-      document.getElementById('comments-container').innerHTML = '';
-      document.getElementById('new-comment').value = '';
+      // Create action item details section (read-only) - more compact
+      const detailsHtml = `
+        <div class="action-item-details">
+          <h3>${item.title || 'No title'}</h3>
+        </div>
+        <!-- Comments container will be populated by renderComments() -->
+        <div id="comments-container" class="comments-list">
+          <div class="loading-comments">Loading comments...</div>
+        </div>`;
       
-      // Set up mentions autocomplete for the comment textarea (with delay to ensure modal is rendered)
+      // Append all content to dynamic content
+      dynamicContent.innerHTML = detailsHtml;
+      
+      // Set up mentions after a short delay to ensure DOM is ready
       setTimeout(() => {
         console.log('Setting up mentions autocomplete for comments modal');
         setupMentionsAutocomplete('new-comment');
+        
+        // Add Enter key handler for the comment textarea
+        const commentTextarea = document.getElementById('new-comment');
+        if (commentTextarea) {
+          commentTextarea.addEventListener('keydown', function(e) {
+            // If Enter is pressed without Shift, submit the comment
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              addComment();
+            }
+            // Allow Shift+Enter for new lines
+          });
+        }
       }, 100);
       
       // Load comments for this item
       loadCommentsForItem(itemId);
+      
+      // Set focus to the comment textarea
+      const commentTextarea = document.getElementById('new-comment');
+      if (commentTextarea) {
+        commentTextarea.focus();
+      }
     }
     
     // Simple test function to verify backend connectivity
@@ -913,35 +1004,427 @@
         .getCommentsForActionItem(itemId);
     }
     
-    // Render comments in the comments container
+    // Format time ago string (e.g., '2 hours ago')
+    function formatTimeAgo(date) {
+      if (!(date instanceof Date)) {
+        date = new Date(date);
+      }
+      
+      const now = new Date();
+      const seconds = Math.floor((now - date) / 1000);
+      
+      const intervals = {
+        year: 31536000,
+        month: 2592000,
+        week: 604800,
+        day: 86400,
+        hour: 3600,
+        minute: 60
+      };
+      
+      for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+        const interval = Math.floor(seconds / secondsInUnit);
+        if (interval >= 1) {
+          return interval === 1 ? `1 ${unit} ago` : `${interval} ${unit}s ago`;
+        }
+      }
+      
+      return 'just now';
+    }
+    
+    // Close the comments modal
+    function closeCommentsModal() {
+      const modal = document.getElementById('commentsModal');
+      if (modal) {
+        // Remove the modal from the DOM
+        modal.remove();
+        // Re-enable body scrolling
+        document.body.style.overflow = 'auto';
+      }
+    }
+    
+    // Handle comment submission
+    function handleCommentSubmit(e) {
+      e.preventDefault();
+      const commentText = document.getElementById('comment-input')?.value.trim();
+      
+      if (!commentText) {
+        alert('Please enter a comment');
+        return false;
+      }
+      
+      if (!currentActionItemId) {
+        alert('No action item selected');
+        return false;
+      }
+      
+      showSpinner('Posting comment...');
+      
+      const commentData = {
+        content: commentText,
+        author: getCurrentUserEmail(),
+        timestamp: new Date().toISOString(),
+        mentionedUsers: []
+      };
+      
+      // Process mentions in the comment
+      const mentionElements = document.querySelectorAll('.mention');
+      mentionElements.forEach(mention => {
+        const email = mention.getAttribute('data-email');
+        if (email) {
+          commentData.mentionedUsers.push(email);
+        }
+      });
+      
+      google.script.run
+        .withSuccessHandler(function(savedComment) {
+          console.log('Comment added:', savedComment);
+          const commentInput = document.getElementById('comment-input');
+          if (commentInput) commentInput.value = '';
+          loadCommentsForItem(currentActionItemId);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding comment:', error);
+          hideSpinner();
+          alert('Error adding comment: ' + error);
+        })
+        .addCommentToActionItem(currentActionItemId, commentData);
+      
+      return false;
+    }
+
     function renderComments(comments) {
       const container = document.getElementById('comments-container');
+      if (!container) return;
+      
+      // Clear existing content
+      container.innerHTML = '';
+      
+      // Add comment form at the top
+      const form = document.createElement('form');
+      form.id = 'comment-form';
+      form.onsubmit = handleCommentSubmit;
+      form.className = 'comment-form';
+      form.style.width = '100%';
+      form.innerHTML = `
+        <div class="form-group mb-2">
+          <textarea 
+            id="comment-input" 
+            class="form-control comment-input" 
+            placeholder="Add a comment..." 
+            rows="2"
+            style="resize: none; border-radius: 18px; padding: 8px 12px; font-size: 14px;"
+          ></textarea>
+        </div>
+        <div class="form-group d-flex justify-content-end align-items-center gap-2 mb-3">
+          <button type="button" id="cancel-comment" class="btn btn-sm btn-outline-secondary">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-sm btn-primary">
+            Post Comment
+          </button>
+        </div>
+      `;
+      container.appendChild(form);
+      
+      // Add cancel button handler
+      document.getElementById('cancel-comment')?.addEventListener('click', closeCommentsModal);
+      
+      // Setup mentions for the new comment input
+      setupMentionsAutocomplete('comment-input');
+      
+      // Create a single comments container
+      const commentsContainer = document.createElement('div');
+      commentsContainer.className = 'comments-container-content';
+      commentsContainer.style.padding = '0 8px';
       
       if (!comments || comments.length === 0) {
-        container.innerHTML = '<div class="empty-state">No comments yet. Be the first to add one!</div>';
+        const noComments = document.createElement('div');
+        noComments.className = 'text-muted text-center py-3';
+        noComments.textContent = 'No comments yet. Be the first to comment!';
+        container.appendChild(noComments);
         return;
       }
       
-      const commentsHtml = comments.map(comment => {
-        const timestamp = new Date(comment.timestamp).toLocaleString();
-        const content = comment.content || '';
-        const author = comment.author || 'Unknown';
+      // Add comments header
+      const commentsHeader = document.createElement('div');
+      commentsHeader.className = 'comments-header';
+      commentsHeader.innerHTML = `<h6 style="margin: 0; font-size: 15px; font-weight: 500; color: #202124;">${comments.length} ${comments.length === 1 ? 'Comment' : 'Comments'}</h6>`;
+      container.appendChild(commentsHeader);
+      
+      // Create comments list container
+      const commentsList = document.createElement('div');
+      commentsList.className = 'comments-list';
+      container.appendChild(commentsList);
+      
+      // Sort comments by timestamp in descending order (newest first)
+      const sortedComments = [...comments].sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA; // Sort newest first
+      });
+      
+      // Add comments to the list in reverse chronological order
+      sortedComments.forEach(comment => {
+        const { content, author, timestamp, mentionedUsers = [], lastEdited, commentId } = comment;
+        const commentEl = document.createElement('div');
+        const isCurrentUser = author === getCurrentUserEmail();
+        commentEl.className = `comment ${isCurrentUser ? 'current-user' : ''}`;
+        commentEl.setAttribute('data-comment-id', commentId);
+        
+        // Format the date
+        const date = new Date(timestamp);
+        const formattedDate = date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        
+        // Calculate time ago
+        const timeAgo = formatTimeAgo(date);
+        
+        // Get user's display name (first and last name if available, otherwise username)
+        const user = availableUsers.find(u => u.email === author);
+        const displayName = user ? 
+          `${user.firstName || ''} ${user.lastName || ''}`.trim() : 
+          author.split('@')[0];
         
         // Process mentions in the comment content
-        const processedContent = processMentionsInText(content);
+        let processedContent = content;
+        const mentions = Array.isArray(mentionedUsers) ? mentionedUsers : [];
+        mentions.forEach(mention => {
+          if (mention) {
+            const mentionUser = availableUsers.find(u => u.email === mention);
+            const mentionName = mentionUser?.lastName || mentionUser?.firstName || mention.split('@')[0];
+            const mentionRegex = new RegExp(`@${mention}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            processedContent = processedContent.replace(
+              mentionRegex, 
+              `<span class="mention" data-email="${mention}">@${mentionName}</span>`
+            );
+          }
+        });
         
-        return `
-          <div class="comment-item">
+        // Create comment HTML with bubble
+        const commentHTML = `
+          <div class="comment-bubble">
             <div class="comment-header">
-              <span class="comment-author">${author}</span>
-              <span class="comment-timestamp">${timestamp}</span>
+              <span class="comment-author">${displayName}</span>
+              <span class="comment-time" title="${formattedDate}">${timeAgo}</span>
+              ${lastEdited ? '<span class="comment-edited">(edited)</span>' : ''}
             </div>
             <div class="comment-content">${processedContent}</div>
           </div>
+          <div class="comment-actions">
+            <span class="comment-action" onclick="handleCommentAction('like', '${comment.commentId}')">Like</span>
+            <span class="comment-action" onclick="handleCommentAction('reply', '${comment.commentId}')">Reply</span>
+            ${isCurrentUser ? `
+              <span class="comment-action" onclick="handleCommentAction('edit', '${comment.commentId}')">Edit</span>
+              <span class="comment-action" onclick="handleCommentAction('delete', '${comment.commentId}')">Delete</span>
+            ` : ''}
+          </div>
         `;
-      }).join('');
+        
+        commentEl.innerHTML = commentHTML;
+        
+        // Append to maintain reverse chronological order
+        commentsList.appendChild(commentEl);
+      });
+    }
+    
+    // Handle comment actions (like, reply, edit, delete)
+    function handleCommentAction(action, commentId, event) {
+      if (event) event.stopPropagation();
       
-      container.innerHTML = commentsHtml;
+      const comment = actionItems
+        .flatMap(item => item.comments || [])
+        .find(c => c.commentId === commentId);
+      
+      if (!comment) return;
+      
+      const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
+      const isCurrentUser = comment.author === getCurrentUserEmail();
+      
+      switch (action) {
+        case 'like':
+          // Toggle like
+          const likes = comment.likes || [];
+          const userEmail = getCurrentUserEmail();
+          const likeIndex = likes.indexOf(userEmail);
+          
+          if (likeIndex === -1) {
+            comment.likes = [...likes, userEmail];
+          } else {
+            comment.likes = likes.filter((_, i) => i !== likeIndex);
+          }
+          
+          // Update the UI
+          const likeBtn = document.querySelector(`[onclick*="handleCommentAction('like', '${commentId}')"]`);
+          if (likeBtn) {
+            likeBtn.textContent = comment.likes.includes(userEmail) 
+              ? `Liked (${comment.likes.length})` 
+              : `Like (${comment.likes.length || ''})`;
+          }
+          
+          // Save the updated comment
+          saveComment(comment);
+          break;
+          
+        case 'reply':
+          // Focus the comment input and add @mention
+          const commentInput = document.getElementById('comment-input');
+          if (commentInput) {
+            const user = availableUsers.find(u => u.email === comment.author);
+            const displayName = user?.lastName || user?.firstName || comment.author.split('@')[0];
+            commentInput.value = `@${displayName} `;
+            commentInput.focus();
+          }
+          break;
+          
+        case 'edit':
+          if (!isCurrentUser) return;
+          
+          // Create edit form
+          const editForm = document.createElement('div');
+          editForm.className = 'comment-edit-form';
+          editForm.innerHTML = `
+            <textarea class="comment-edit-input">${comment.content}</textarea>
+            <div class="comment-edit-actions">
+              <button class="btn btn-sm btn-outline-secondary" onclick="cancelEditComment('${commentId}')">Cancel</button>
+              <button class="btn btn-sm btn-primary" onclick="saveEditedComment('${commentId}', this)">Save</button>
+            </div>
+          `;
+          
+          // Replace comment content with edit form
+          const contentEl = commentEl?.querySelector('.comment-content');
+          if (contentEl) {
+            contentEl.style.display = 'none';
+            contentEl.after(editForm);
+            
+            // Focus the textarea
+            const textarea = editForm.querySelector('textarea');
+            if (textarea) {
+              textarea.focus();
+              textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            }
+          }
+          break;
+          
+        case 'delete':
+          if (!isCurrentUser) return;
+          
+          if (confirm('Are you sure you want to delete this comment?')) {
+            // Find and remove the comment from the action item
+            actionItems.forEach(item => {
+              if (item.comments) {
+                const index = item.comments.findIndex(c => c.commentId === commentId);
+                if (index !== -1) {
+                  item.comments.splice(index, 1);
+                  // Update the UI
+                  commentEl?.remove();
+                  // Save changes
+                  saveActionItem(item);
+                }
+              }
+            });
+          }
+          break;
+      }
+    }
+    
+    // Save an edited comment
+    function saveEditedComment(commentId, button) {
+      const comment = actionItems
+        .flatMap(item => item.comments || [])
+        .find(c => c.commentId === commentId);
+      
+      if (!comment) return;
+      
+      const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
+      const editForm = commentEl?.querySelector('.comment-edit-form');
+      const textarea = editForm?.querySelector('textarea');
+      const contentEl = commentEl?.querySelector('.comment-content');
+      
+      if (!textarea || !contentEl) return;
+      
+      const newContent = textarea.value.trim();
+      if (!newContent) return;
+      
+      // Update comment content
+      comment.content = newContent;
+      comment.lastEdited = new Date().toISOString();
+      
+      // Update the UI
+      contentEl.innerHTML = comment.content;
+      contentEl.style.display = '';
+      editForm.remove();
+      
+      // Show edited indicator
+      const editedEl = commentEl.querySelector('.comment-edited') || document.createElement('span');
+      if (!editedEl.classList.contains('comment-edited')) {
+        editedEl.className = 'comment-edited';
+        editedEl.textContent = ' (edited)';
+        const timeEl = commentEl.querySelector('.comment-time');
+        timeEl.after(editedEl);
+      }
+      
+      // Save the updated comment
+      saveComment(comment);
+      
+      // Re-enable the save button if it was disabled
+      if (button) button.disabled = false;
+    }
+    
+    // Cancel editing a comment
+    function cancelEditComment(commentId) {
+      const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
+      const editForm = commentEl?.querySelector('.comment-edit-form');
+      const contentEl = commentEl?.querySelector('.comment-content');
+      
+      if (editForm && contentEl) {
+        contentEl.style.display = '';
+        editForm.remove();
+      }
+    }
+    
+    // Save a comment to the backend
+    function saveComment(comment) {
+      // Find the parent action item
+      const actionItem = actionItems.find(item => 
+        item.comments?.some(c => c.commentId === comment.commentId)
+      );
+      
+      if (!actionItem) return;
+      
+      // Update the comment in the action item
+      const commentIndex = actionItem.comments.findIndex(c => c.commentId === comment.commentId);
+      if (commentIndex !== -1) {
+        actionItem.comments[commentIndex] = comment;
+      }
+      
+      // Save the updated action item
+      saveActionItem(actionItem);
+    }
+    
+    // Handle Enter key in comment textarea
+    function handleCommentKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        
+        // Show loading state
+        const button = document.getElementById('post-comment-btn');
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.innerHTML = '<i class="material-icons spin">refresh</i> Posting...';
+        
+        // Small delay to show loading state
+        setTimeout(() => {
+          addComment();
+          button.disabled = false;
+          button.textContent = originalText;
+        }, 100);
+      }
     }
     
     // Process @mentions in text and make them clickable
@@ -1556,6 +2039,10 @@
     // Load comments
     function loadComments(itemId) {
       const commentsContainer = document.getElementById('comments-container');
+      if (!commentsContainer) {
+        console.warn('Comments container not found');
+        return;
+      }
       commentsContainer.innerHTML = '<div class="loading">Loading comments...</div>';
 
       google.script.run
@@ -1585,6 +2072,10 @@
     // Load history
     function loadHistory(itemId) {
       const historyContainer = document.getElementById('history-container');
+      if (!historyContainer) {
+        console.warn('History container not found');
+        return;
+      }
       historyContainer.innerHTML = '<div class="loading">Loading history...</div>';
 
       google.script.run
@@ -1613,6 +2104,33 @@
         .getActionItemHistory(itemId);
     }
 
+    // Helper function to handle category selection for an item
+    function handleCategorySelection(item) {
+      if (!item.categoryPath) return;
+      
+      console.log('Attempting to select category path:', item.categoryPath);
+      const pathParts = item.categoryPath.split('/');
+      
+      // First, ensure the first category is selected
+      const categorySelect = document.getElementById('category-level-1');
+      if (categorySelect && pathParts[0]) {
+        // Set the value directly first
+        categorySelect.value = pathParts[0];
+        // Trigger change event to load subcategories
+        const event = new Event('change', { bubbles: true });
+        categorySelect.dispatchEvent(event);
+      }
+      
+      // Then handle the full path after a short delay to allow subcategories to load
+      setTimeout(() => {
+        try {
+          selectCategoryPath(pathParts);
+        } catch (error) {
+          console.warn('Failed to select category path, but form is still populated:', error);
+        }
+      }, 200);
+    }
+
     // Edit action item
     function editActionItem(actionItemId) {
       const item = actionItems.find(i => i.actionItemId === actionItemId);
@@ -1623,43 +2141,61 @@
 
       console.log('Editing action item:', item);
 
-      // Open the modal first
-      openNewItemModal();
+      // Get modal and form elements
+      const modal = document.getElementById('item-modal');
+      const form = document.getElementById('item-form');
+      const modalTitle = document.getElementById('modal-title');
 
-      // Populate the modal with the item's data
-      document.getElementById('item-id').value = item.actionItemId || '';
+      // Set modal title for editing
+      if (modalTitle) modalTitle.textContent = 'Edit Action Item';
+      
+      // Reset form but preserve the ID
+      if (form) form.reset();
+      
+      // Clear previous dynamic dropdowns
+      const categoryContainer = document.getElementById('dynamic-category-container');
+      if (categoryContainer) categoryContainer.innerHTML = '';
+      
+      // Load options first, then populate the form
+      loadActionItemOptions(() => {
+        // Set the item ID first
+        document.getElementById('item-id').value = item.actionItemId || '';
       document.getElementById('item-title').value = item.title || '';
       document.getElementById('item-description').value = item.description || '';
       document.getElementById('item-assignee').value = item.assignedTo || '';
       document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
       document.getElementById('item-priority').value = item.priority || 'Medium';
-      document.getElementById('item-status').value = item.status || 'Open';
-  
-      // Populate other fields if they exist
-      const tagsField = document.getElementById('item-tags');
-      if (tagsField && item.tags) {
-        tagsField.value = Array.isArray(item.tags) ? item.tags.join(', ') : item.tags;
-      }
-  
-      const mentionsField = document.getElementById('item-mentions');
-      if (mentionsField && item.mentionedUsers) {
-        mentionsField.value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers;
-      }
+        document.getElementById('item-status').value = item.status || 'Open';
+    
+        // Populate other fields if they exist
+        const tagsField = document.getElementById('item-tags');
+        if (tagsField && item.tags) {
+          tagsField.value = Array.isArray(item.tags) ? item.tags.join(', ') : item.tags;
+        }
+    
+        const mentionsField = document.getElementById('item-mentions');
+        if (mentionsField && item.mentionedUsers) {
+          mentionsField.value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers;
+        }
 
-      // Handle category selection after modal is open and populated
-      if (item.categoryPath) {
-        console.log('Attempting to select category path:', item.categoryPath);
-        const pathParts = item.categoryPath.split('/');
-  
-        // Try to select the category path, but don't let it block the form population
-        setTimeout(() => {
-          try {
-            selectCategoryPath(pathParts);
-          } catch (error) {
-            console.warn('Failed to select category path, but form is still populated:', error);
-          }
-        }, 100); // Small delay to ensure modal is fully rendered
-      }
+        // Show the modal first
+        if (modal) modal.style.display = 'block';
+        
+        // Ensure the category dropdown is populated before trying to select a value
+        const categorySelect = document.getElementById('category-level-1');
+        if (categorySelect && categorySelect.options.length <= 1) {
+          // If the category dropdown isn't populated yet, wait for it
+          const checkCategorySelect = setInterval(() => {
+            if (categorySelect.options.length > 1) {
+              clearInterval(checkCategorySelect);
+              handleCategorySelection(item);
+            }
+          }, 50);
+        } else {
+          // If the dropdown is already populated, proceed with selection
+          handleCategorySelection(item);
+        }
+      });
     }
 
     async function selectCategoryPath(path) {
@@ -2053,7 +2589,8 @@
     
     // Add comment (fixed version)
     function addComment() {
-      const commentText = document.getElementById('new-comment').value.trim();
+      const commentTextarea = document.getElementById('new-comment');
+      const commentText = commentTextarea.value.trim();
       
       if (!commentText) {
         alert('Please enter a comment');
@@ -2065,7 +2602,12 @@
         return;
       }
       
-      showSpinner('Adding comment...');
+      // Disable the textarea and show loading state
+      commentTextarea.disabled = true;
+      const postButton = document.getElementById('post-comment-btn');
+      const originalButtonText = postButton.innerHTML;
+      postButton.disabled = true;
+      postButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Posting...';
       
       const commentData = {
         content: commentText,
@@ -2075,13 +2617,20 @@
       google.script.run
         .withSuccessHandler(function(savedComment) {
           console.log('Comment added:', savedComment);
-          document.getElementById('new-comment').value = ''; // Clear the textarea
+          commentTextarea.value = ''; // Clear the textarea
           loadCommentsForItem(currentActionItemId); // Reload comments
-          hideSpinner();
+          // Re-enable the textarea and reset button
+          commentTextarea.disabled = false;
+          postButton.disabled = false;
+          postButton.innerHTML = originalButtonText;
+          commentTextarea.focus();
         })
         .withFailureHandler(function(error) {
           console.error('Error adding comment:', error);
-          hideSpinner();
+          // Re-enable the textarea and reset button on error
+          commentTextarea.disabled = false;
+          postButton.disabled = false;
+          postButton.innerHTML = originalButtonText;
           alert('Error adding comment: ' + error);
         })
         .addCommentToActionItem(currentActionItemId, commentData);
@@ -3327,27 +3876,62 @@ function applyAdvancedFilters() {
      * This is called when the modal is opened.
      */
     function populateTopLevelCategories() {
+      console.log('populateTopLevelCategories: Starting to populate categories...');
       const categorySelect = document.getElementById('category-level-1');
+      
+      if (!categorySelect) {
+        console.error('populateTopLevelCategories: Could not find category-level-1 select element');
+        return;
+      }
+      
       // Clear existing options except the first 'Select...' one
       while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
       }
-
-      const categories = actionItemOptions.actionItems.categories;
+      
+      console.log('populateTopLevelCategories: actionItemOptions:', actionItemOptions);
+      
+      // Get categories from the options data
+      const categories = actionItemOptions?.actionItems?.categories || {};
+      console.log('populateTopLevelCategories: Available category keys:', Object.keys(categories));
+      
       if (!categories || Object.keys(categories).length === 0) {
-        console.error('No categories available to populate dropdown.');
+        console.error('populateTopLevelCategories: No categories available to populate dropdown.');
         categorySelect.disabled = true;
         return;
       }
-
+      
+      let optionsAdded = 0;
+      
+      // Add categories to the dropdown
       for (const categoryKey in categories) {
-        const category = categories[categoryKey];
-        const option = document.createElement('option');
-        option.value = categoryKey;
-        option.textContent = category.title || categoryKey;
-        categorySelect.appendChild(option);
+        if (categories.hasOwnProperty(categoryKey)) {
+          const category = categories[categoryKey];
+          console.log(`populateTopLevelCategories: Processing category ${categoryKey}:`, category);
+          
+          // Get the display name - handle both direct string values and objects with title property
+          let displayName = categoryKey;
+          if (category && typeof category === 'object' && category !== null) {
+            displayName = category.title || categoryKey;
+          }
+          
+          if (displayName) {
+            const option = document.createElement('option');
+            option.value = categoryKey;
+            option.textContent = displayName;
+            categorySelect.appendChild(option);
+            optionsAdded++;
+            console.log(`populateTopLevelCategories: Added option: ${categoryKey} = ${displayName}`);
+          }
+        }
       }
-      categorySelect.disabled = false;
+      
+      // If we added any options, enable the dropdown
+      categorySelect.disabled = optionsAdded === 0;
+      console.log(`populateTopLevelCategories: Added ${optionsAdded} categories, dropdown ${categorySelect.disabled ? 'disabled' : 'enabled'}`);
+      
+      // Force a reflow to ensure the dropdown updates
+      void categorySelect.offsetHeight;
     }
     
     // ===== ADMIN FUNCTIONALITY =====
@@ -3485,20 +4069,20 @@ function applyAdvancedFilters() {
       }
       
       const groupForm = document.getElementById('group-form');
-      if (groupForm) groupForm.addEventListener('submit', function(e) {
+      if (groupForm) safeAddEventListener(groupForm, 'submit', function(e) {
         e.preventDefault();
         saveGroup();
       });
       
       // Set up modal close handlers
       document.querySelectorAll('.close-modal').forEach(closeBtn => {
-        closeBtn.addEventListener('click', function() {
+        safeAddEventListener(closeBtn, 'click', function() {
           this.closest('.modal').style.display = 'none';
         });
       });
       
       // Close modals when clicking outside
-      window.addEventListener('click', function(event) {
+      safeAddEventListener(window, 'click', function(event) {
         if (event.target.classList.contains('modal')) {
           event.target.style.display = 'none';
         }
