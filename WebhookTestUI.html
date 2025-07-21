@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <style>
+      body {
+        font-family: 'Roboto', Arial, sans-serif;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #1a73e8;
+        font-size: 20px;
+        margin-bottom: 20px;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+      select, textarea, input[type="text"] {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #dadce0;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+      .button-group {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+      }
+      .button-group button {
+        flex: 1;
+      }
+      .status-message {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 4px;
+        display: none;
+      }
+      .success {
+        background-color: #e6f4ea;
+        color: #137333;
+        border: 1px solid #b6e0c2;
+      }
+      .error {
+        background-color: #fce8e6;
+        color: #c5221f;
+        border: 1px solid #f5b5b3;
+      }
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(26, 115, 232, 0.3);
+        border-radius: 50%;
+        border-top-color: #1a73e8;
+        animation: spin 1s ease-in-out infinite;
+        margin-right: 10px;
+        vertical-align: middle;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Test Webhook Notifications</h1>
+    
+    <div class="form-group">
+      <label for="user-select">Select User or Group:</label>
+      <select id="user-select" class="form-control">
+        <option value="">-- Select a user or group --</option>
+      </select>
+    </div>
+    
+    <div class="form-group">
+      <label for="message-type">Message Type:</label>
+      <select id="message-type" class="form-control">
+        <option value="mention">Mention Notification</option>
+        <option value="assignment">Assignment Notification</option>
+        <option value="custom">Custom Message</option>
+      </select>
+    </div>
+    
+    <div id="custom-message-group" class="form-group" style="display: none;">
+      <label for="custom-message">Custom Message:</label>
+      <textarea id="custom-message" class="form-control" placeholder="Enter your custom message here..."></textarea>
+    </div>
+    
+    <div class="button-group">
+      <button id="send-test-btn" class="action">Send Test Notification</button>
+      <button id="close-btn" class="action">Close</button>
+    </div>
+    
+    <div id="status-message" class="status-message"></div>
+    
+    <script>
+      // Global variables
+      let users = [];
+      let groups = [];
+      
+      // DOM elements
+      const userSelect = document.getElementById('user-select');
+      const messageType = document.getElementById('message-type');
+      const customMessageGroup = document.getElementById('custom-message-group');
+      const customMessage = document.getElementById('custom-message');
+      const sendTestBtn = document.getElementById('send-test-btn');
+      const closeBtn = document.getElementById('close-btn');
+      const statusMessage = document.getElementById('status-message');
+      
+      // Initialize the UI
+      document.addEventListener('DOMContentLoaded', function() {
+        // Load users and groups
+        loadUsersAndGroups();
+        
+        // Toggle custom message field
+        messageType.addEventListener('change', function() {
+          customMessageGroup.style.display = this.value === 'custom' ? 'block' : 'none';
+        });
+        
+        // Send test notification
+        sendTestBtn.addEventListener('click', sendTestNotification);
+        
+        // Close the dialog
+        closeBtn.addEventListener('click', function() {
+          google.script.host.close();
+        });
+      });
+      
+      // Load users and groups
+      function loadUsersAndGroups() {
+        showLoading('Loading users and groups...');
+        
+        // Load users
+        google.script.run
+          .withSuccessHandler(function(usersData) {
+            users = usersData || [];
+            
+            // Load groups
+            google.script.run
+              .withSuccessHandler(function(groupsData) {
+                groups = groupsData || [];
+                populateUserSelect();
+                hideLoading();
+              })
+              .withFailureHandler(handleError)
+              .getNotificationGroups();
+          })
+          .withFailureHandler(handleError)
+          .getUsers();
+      }
+      
+      // Populate user select dropdown
+      function populateUserSelect() {
+        userSelect.innerHTML = '<option value="">-- Select a user or group --</option>';
+        
+        // Add users
+        if (users.length > 0) {
+          const userGroup = document.createElement('optgroup');
+          userGroup.label = 'Users';
+          
+          users.forEach(user => {
+            if (user.webhookUrl) {
+              const option = document.createElement('option');
+              option.value = `user:${user.email}`;
+              option.textContent = `${user.name} (${user.email})`;
+              userGroup.appendChild(option);
+            }
+          });
+          
+          if (userGroup.children.length > 0) {
+            userSelect.appendChild(userGroup);
+          }
+        }
+        
+        // Add groups
+        if (groups.length > 0) {
+          const groupGroup = document.createElement('optgroup');
+          groupGroup.label = 'Groups';
+          
+          groups.forEach(group => {
+            if (group.webhookUrl) {
+              const option = document.createElement('option');
+              option.value = `group:${group.groupId}`;
+              option.textContent = `${group.groupName} (Group)`;
+              groupGroup.appendChild(option);
+            }
+          });
+          
+          if (groupGroup.children.length > 0) {
+            userSelect.appendChild(groupGroup);
+          }
+        }
+        
+        if (userSelect.options.length === 1) {
+          userSelect.innerHTML = '<option value="">No users or groups with webhooks found</option>';
+          sendTestBtn.disabled = true;
+        }
+      }
+      
+      // Send test notification
+      function sendTestNotification() {
+        const selectedValue = userSelect.value;
+        if (!selectedValue) {
+          showError('Please select a user or group');
+          return;
+        }
+        
+        const [type, id] = selectedValue.split(':');
+        const messageTypeValue = messageType.value;
+        let message = '';
+        
+        // Prepare message based on type
+        if (messageTypeValue === 'custom') {
+          message = customMessage.value.trim();
+          if (!message) {
+            showError('Please enter a custom message');
+            return;
+          }
+        } else if (messageTypeValue === 'mention') {
+          message = 'This is a test mention notification. You were mentioned in a comment by the system administrator.';
+        } else if (messageTypeValue === 'assignment') {
+          message = 'This is a test assignment notification. A new task has been assigned to you by the system administrator.';
+        }
+        
+        showLoading('Sending test notification...');
+        
+        // Send test notification
+        google.script.run
+          .withSuccessHandler(function(result) {
+            showSuccess('Test notification sent successfully!');
+          })
+          .withFailureHandler(handleError)
+          .testWebhookNotification(type, id, message);
+      }
+      
+      // UI Helper functions
+      function showLoading(message) {
+        statusMessage.textContent = message;
+        statusMessage.className = 'status-message';
+        statusMessage.style.display = 'block';
+        statusMessage.innerHTML = `<div class="loading"></div>${message}`;
+        sendTestBtn.disabled = true;
+      }
+      
+      function hideLoading() {
+        statusMessage.style.display = 'none';
+        sendTestBtn.disabled = false;
+      }
+      
+      function showSuccess(message) {
+        statusMessage.textContent = message;
+        statusMessage.className = 'status-message success';
+        statusMessage.style.display = 'block';
+        sendTestBtn.disabled = false;
+        
+        // Hide success message after 3 seconds
+        setTimeout(() => {
+          statusMessage.style.display = 'none';
+        }, 3000);
+      }
+      
+      function showError(message) {
+        statusMessage.textContent = message;
+        statusMessage.className = 'status-message error';
+        statusMessage.style.display = 'block';
+        sendTestBtn.disabled = false;
+      }
+      
+      function handleError(error) {
+        console.error('Error:', error);
+        showError(error.message || 'An error occurred. Please try again.');
+      }
+    </script>
+  </body>
+</html>

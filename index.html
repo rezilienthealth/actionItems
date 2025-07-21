@@ -29,28 +29,66 @@
       <div id="main-content">
         <div class="tabs">
           <button class="tab-button active" data-tab="my-items">My Items</button>
-          <button type="button" class="btn btn-primary" onclick="openNewItemModal()">New Action Item</button>
-          <button type="button" class="btn btn-secondary" onclick="openNewTemplateModal()">New Template</button>
-          <button type="button" class="btn btn-danger" onclick="clearServerCache()">Clear Server Cache</button>
-
           <button class="tab-button" data-tab="all-items">All Items</button>
+          <button class="tab-button" data-tab="activity-feed">Activity Feed</button>
           <button class="tab-button" data-tab="templates">Templates</button>
-          <button class="tab-button" data-tab="options">Options</button>
+          <button class="tab-button" data-tab="admin" id="admin-tab" style="display: none;">Admin</button>
         </div>
         
         <div class="tab-content active" id="my-items-tab">
           <div class="controls">
             <button id="new-item-btn" class="primary-btn">New Action Item</button>
-            <div class="filter-container">
-              <select id="status-filter">
-                <option value="all">All Statuses</option>
-                <option value="Open">Open</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Pending Approval">Pending Approval</option>
-                <option value="Completed">Completed</option>
-              </select>
-
-              <input type="text" id="search-input" placeholder="Search...">
+            <button id="self-assign-btn" class="secondary-btn">Self-Assign Selected</button>
+            
+            <div class="advanced-filters">
+              <div class="filter-row">
+                <select id="assignment-filter">
+                  <option value="all">All Assignments</option>
+                  <option value="assigned-to-me">Assigned to Me</option>
+                  <option value="unassigned">Unassigned</option>
+                  <option value="assigned-to-others">Assigned to Others</option>
+                  <!-- Users will be populated dynamically -->
+                </select>
+                
+                <select id="created-by-filter">
+                  <option value="all">All Creators</option>
+                  <!-- Creators will be populated dynamically -->
+                </select>
+                
+                <select id="status-filter">
+                  <option value="all">All Statuses</option>
+                  <option value="Open">Open/New</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Updating">Updating</option>
+                  <option value="Pending Approval">Pending Approval</option>
+                  <option value="Completed">Completed</option>
+                </select>
+                
+                <select id="priority-filter">
+                  <option value="all">All Priorities</option>
+                  <option value="High">High Priority</option>
+                  <option value="Medium">Medium Priority</option>
+                  <option value="Low">Low Priority</option>
+                </select>
+              </div>
+              
+              <div class="filter-row">
+                <select id="due-date-filter">
+                  <option value="all">All Due Dates</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="today">Due Today</option>
+                  <option value="this-week">Due This Week</option>
+                  <option value="next-week">Due Next Week</option>
+                </select>
+                
+                <select id="category-filter">
+                  <option value="all">All Categories</option>
+                  <!-- Categories will be populated dynamically -->
+                </select>
+                
+                <input type="text" id="search-input" placeholder="Search titles, descriptions, patients...">
+                <button id="clear-filters-btn" class="secondary-btn">Clear Filters</button>
+              </div>
             </div>
           </div>
           
@@ -63,19 +101,87 @@
           <div class="controls">
             <button id="new-item-btn-all" class="primary-btn">New Action Item</button>
             <div class="filter-container">
-              <select id="status-filter-all">
-                <option value="all">All Statuses</option>
-                <option value="Open">Open</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Pending Approval">Pending Approval</option>
-                <option value="Completed">Completed</option>
-              </select>
-              <input type="text" id="search-input-all" placeholder="Search...">
+              <div class="filter-row">
+                <select id="assignment-filter-all">
+                  <option value="all">All Assignments</option>
+                  <!-- Users will be populated dynamically -->
+                </select>
+                
+                <select id="created-by-filter-all">
+                  <option value="all">All Creators</option>
+                  <!-- Creators will be populated dynamically -->
+                </select>
+                
+                <select id="status-filter-all">
+                  <option value="all">All Statuses</option>
+                  <option value="Open">Open/New</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Updating">Updating</option>
+                  <option value="Pending Approval">Pending Approval</option>
+                  <option value="Completed">Completed</option>
+                </select>
+                
+                <select id="priority-filter-all">
+                  <option value="all">All Priorities</option>
+                  <option value="High">High Priority</option>
+                  <option value="Medium">Medium Priority</option>
+                  <option value="Low">Low Priority</option>
+                </select>
+              </div>
+              
+              <div class="filter-row">
+                <select id="due-date-filter-all">
+                  <option value="all">All Due Dates</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="today">Due Today</option>
+                  <option value="this-week">Due This Week</option>
+                  <option value="next-week">Due Next Week</option>
+                </select>
+                
+                <select id="category-filter-all">
+                  <option value="all">All Categories</option>
+                  <!-- Categories will be populated dynamically -->
+                </select>
+                
+                <input type="text" id="search-input-all" placeholder="Search titles, descriptions, patients...">
+                <button id="clear-filters-btn-all" class="secondary-btn">Clear Filters</button>
+              </div>
             </div>
           </div>
           
           <div class="items-container" id="all-items-container">
             <!-- Items will be loaded here -->
+          </div>
+        </div>
+        
+        <div class="tab-content" id="activity-feed-tab">
+          <div class="controls">
+            <button id="refresh-feed-btn" class="primary-btn">Refresh Feed</button>
+            
+            <div class="feed-filters">
+              <div class="filter-row">
+                <select id="feed-filter-type">
+                  <option value="all">All Activity</option>
+                  <option value="comments">Comments Only</option>
+                  <option value="mentions">Mentions Only</option>
+                  <option value="status-changes">Status Changes</option>
+                </select>
+                
+                <select id="feed-filter-timeframe">
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="all">All Time</option>
+                </select>
+                
+                <input type="text" id="feed-search" placeholder="Search activity...">
+                <button id="clear-feed-filters-btn" class="secondary-btn">Clear Filters</button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="activity-feed-container" id="activity-feed-container">
+            <!-- Activity feed will be loaded here -->
           </div>
         </div>
         
@@ -89,22 +195,186 @@
           </div>
         </div>
         
-        <div class="tab-content" id="options-tab">
-          <div class="options-container">
-            <div class="options-section">
-              <h3>Task Options</h3>
-              <div id="task-options-tree" class="options-tree">
-                <!-- Task options will be loaded here -->
+        <div class="tab-content" id="admin-content">
+          <div class="admin-container">
+            <div class="admin-section">
+              <h3>User Management</h3>
+              <div class="admin-controls">
+                <button id="add-user-btn" class="primary-btn">Add User</button>
+                <button id="refresh-users-btn" class="secondary-btn">Refresh</button>
+              </div>
+              <div id="users-table-container">
+                <table id="users-table" class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-table-body">
+                    <!-- Users will be loaded here -->
+                  </tbody>
+                </table>
               </div>
             </div>
             
-            <div class="options-section">
-              <h3>Order Options</h3>
-              <div id="order-options-tree" class="options-tree">
-                <!-- Order options will be loaded here -->
+            <div class="admin-section">
+              <h3>Notification Groups</h3>
+              <div class="admin-controls">
+                <button id="add-group-btn" class="primary-btn">Add Group</button>
+                <button id="refresh-groups-btn" class="secondary-btn">Refresh</button>
+              </div>
+              <div id="groups-table-container">
+                <table id="groups-table" class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Group Name</th>
+                      <th>Group ID</th>
+                      <th>Webhook URL</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="groups-table-body">
+                    <!-- Groups will be loaded here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div class="admin-section">
+              <h3>Group Memberships</h3>
+              <div class="admin-controls">
+                <button id="add-membership-btn" class="primary-btn">Add Membership</button>
+                <button id="refresh-memberships-btn" class="secondary-btn">Refresh</button>
+              </div>
+              <div id="memberships-table-container">
+                <table id="memberships-table" class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>User Email</th>
+                      <th>Group Name</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="memberships-table-body">
+                    <!-- Memberships will be loaded here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div class="admin-section">
+              <h3>Webhook Testing</h3>
+              <div class="admin-controls">
+                <button id="test-webhook-btn" class="primary-btn">Test Webhook Notifications</button>
+                <button id="refresh-webhook-btn" class="secondary-btn">Refresh Users</button>
+              </div>
+              <div class="help-text">
+                <p>Use this tool to test webhook notifications for users. Select a user to send a test notification to their configured webhook URL.</p>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+      
+      <!-- Admin Modals -->
+      <!-- User Modal -->
+      <div id="user-modal" class="modal">
+        <div class="modal-content">
+          <span class="close-modal">&times;</span>
+          <h2 id="user-modal-title">Add User</h2>
+          <form id="user-form">
+            <input type="hidden" id="edit-email">
+            <div class="form-group">
+              <label for="user-email-input">Email *</label>
+              <input type="email" id="user-email-input" required>
+            </div>
+            <div class="form-group">
+              <label for="user-first-name">First Name *</label>
+              <input type="text" id="user-first-name" required>
+            </div>
+            <div class="form-group">
+              <label for="user-last-name">Last Name *</label>
+              <input type="text" id="user-last-name" required>
+            </div>
+            <div class="form-group">
+              <label for="user-display-name">Display Name</label>
+              <input type="text" id="user-display-name">
+            </div>
+            <div class="form-group">
+              <label for="user-role">Role</label>
+              <select id="user-role">
+                <option value="User">User</option>
+                <option value="Admin">Admin</option>
+                <option value="Care Coordinator">Care Coordinator</option>
+                <option value="Provider">Provider</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="user-webhook">Chat Webhook URL</label>
+              <input type="url" id="user-webhook" placeholder="https://chat.googleapis.com/v1/spaces/...">
+            </div>
+            <div class="form-group">
+              <label>
+                <input type="checkbox" id="user-active" checked>
+                Active
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="secondary-btn" onclick="closeUserModal()">Cancel</button>
+              <button type="submit" class="primary-btn" id="save-user-btn">Save User</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      
+      <!-- Group Modal -->
+      <div id="group-modal" class="modal">
+        <div class="modal-content">
+          <span class="close-modal">&times;</span>
+          <h2 id="group-modal-title">Create Group</h2>
+          <form id="group-form">
+            <input type="hidden" id="edit-group-name">
+            <div class="form-group">
+              <label for="group-name">Group Name *</label>
+              <input type="text" id="group-name" required>
+            </div>
+            <div class="form-group">
+              <label for="group-id">Group ID</label>
+              <input type="text" id="group-id" placeholder="Auto-generated if empty">
+            </div>
+            <div class="form-group">
+              <label for="group-webhook">Webhook URL</label>
+              <input type="url" id="group-webhook" placeholder="https://chat.googleapis.com/v1/spaces/...">
+            </div>
+            <div class="form-group">
+              <label>Group Members</label>
+              <div id="group-members-checkboxes" class="checkbox-group">
+                <!-- User checkboxes will be populated here -->
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="secondary-btn" onclick="closeGroupModal()">Cancel</button>
+              <button type="submit" class="primary-btn" id="save-group-btn">Save Group</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      
+      <!-- Confirmation Modal -->
+      <div id="confirm-modal" class="modal">
+        <div class="modal-content">
+          <span class="close-modal">&times;</span>
+          <h2>Confirm Action</h2>
+          <p id="confirm-message">Are you sure you want to perform this action?</p>
+          <div class="modal-footer">
+          <button type="button" class="btn btn-warning" onclick="debugCommentsSheet()" style="margin-right: auto;">🔍 Debug Sheet</button>
+          <button type="button" class="btn btn-warning btn-sm" onclick="runSimpleTest()">Simple Test</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" onclick="addComment()">Add Comment</button>
+        </div>
         </div>
       </div>
       
@@ -118,9 +388,6 @@
             <input type="hidden" id="item-id">
             
             <div class="form-row">
-              <!-- Hidden type field, will be set programmatically -->
-              <input type="hidden" id="item-type" value="order">
-              
               <div class="form-group full-width">
                 <label for="item-status">Status</label>
                 <select id="item-status">
@@ -178,6 +445,12 @@
                 <input type="text" id="item-tags" placeholder="Comma-separated tags">
               </div>
             </div>
+            
+            <div class="form-group">
+              <label for="item-mentions">Mentions</label>
+              <input type="text" id="item-mentions" placeholder="@username1, @username2">
+              <small>Use @username to mention users (e.g., @john.doe, @jane.smith)</small>
+            </div>
 
             <div class="form-row">
               <div class="form-group">
@@ -212,6 +485,17 @@
             <h3>History</h3>
             <div id="history-container">
               <!-- History will be loaded here -->
+            </div>
+            
+            <div class="admin-section">
+              <h3>Webhook Testing</h3>
+              <div class="admin-controls">
+                <button id="test-webhook-btn" class="primary-btn">Test Webhook Notifications</button>
+                <button id="refresh-webhook-btn" class="secondary-btn">Refresh Users</button>
+              </div>
+              <div class="help-text">
+                <p>Use this tool to test webhook notifications for users. Select a user to send a test notification to their configured webhook URL.</p>
+              </div>
             </div>
           </div>
         </div>

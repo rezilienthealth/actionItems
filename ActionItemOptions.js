@@ -3,6 +3,22 @@
  */
 
 /**
+ * Gets action item options for client-side use
+ * @returns {Object} Action item options structure
+ */
+function getClientActionItemOptions() {
+  try {
+    Logger.log('DEBUGGING: getClientActionItemOptions called');
+    const options = buildActionItemOptions();
+    Logger.log('DEBUGGING: getClientActionItemOptions returning:', JSON.stringify(options));
+    return options;
+  } catch (error) {
+    Logger.log('ERROR in getClientActionItemOptions: ' + error.toString());
+    return { actionItems: { categories: {}, selectionTypes: {}, groups: {}, optionsData: {} } };
+  }
+}
+
+/**
  * Builds all action item options into a hierarchical structure
  * @param {boolean} useCache - Whether to use cached options
  * @returns {Object} Hierarchical structure of action item options
@@ -72,7 +88,7 @@ function buildActionItemOptions(useCache = true) {
 
         if (!currentLevel[levelName]) {
           currentLevel[levelName] = {
-            displayName: levelName,
+            title: levelName,
             subcategories: {}
           };
         }
@@ -224,7 +240,7 @@ function getOptionByPath(actionItemType, categoryPath) {
         if (!category) return null;
         
         if (category.options) {
-          return category.options.find(option => option.displayName === part);
+          return category.options.find(option => option.title === part);
         }
         return null;
       } else {

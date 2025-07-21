@@ -1,15 +1,13 @@
 <script>
     // Global variables
     let actionItems = [];
-    let actionItemOptions = {
-      actionItems: {
-        categories: {},
-        selectionTypes: {}
-      }
-    };
-    let currentTab = 'my-items';
+    let actionItemOptions = {};
     let currentUser = '';
-    let userRole = '';
+    let userRole = 'User';
+    let currentActionItemId = null; // Global variable for action item ID
+    let allUsers = []; // For admin functionality
+    let allGroups = []; // For admin functionality
+    let currentTab = 'my-items'; // Current active tab
     
     function clearServerCache() {
       console.log('Attempting to clear server cache...');
@@ -29,11 +27,20 @@
 
     // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
+      loadActionItems();
+      loadActionItemOptions();
+      loadUsers();
+      loadNotificationGroups();
+      loadUsersForMentions(); // Load users for mentions autocomplete
+
       // Set user role (currentUser will be set in renderActionItems)
       userRole = document.getElementById('user-role').dataset.role;
       
       // Initialize tab navigation
       initTabs();
+      
+      // Initialize admin functionality
+      initAdmin();
       
       // Initialize modal functionality
       initModal();
@@ -68,7 +75,13 @@
           document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.remove('active');
           });
-          document.getElementById(tabId + '-tab').classList.add('active');
+          
+          // Handle admin tab special case
+          const contentId = tabId === 'admin' ? 'admin-content' : tabId + '-tab';
+          const contentElement = document.getElementById(contentId);
+          if (contentElement) {
+            contentElement.classList.add('active');
+          }
           
           // Update current tab
           currentTab = tabId;
@@ -76,10 +89,16 @@
           // Refresh data if needed
           if (tabId === 'my-items' || tabId === 'all-items') {
             loadActionItems();
+          } else if (tabId === 'activity-feed') {
+            loadActivityFeed();
           } else if (tabId === 'templates') {
             loadTemplates();
-          } else if (tabId === 'options') {
-            loadActionItemOptions();
+          } else if (tabId === 'admin') {
+            // Load admin data when admin tab is opened
+            setTimeout(() => {
+              loadUsers();
+              loadGroups();
+            }, 100);
           }
         });
       });
@@ -109,7 +128,43 @@
     
     // Close modal
     function closeModal() {
-      document.getElementById('item-modal').style.display = 'none';
+      // Hide the modal
+      const modal = document.getElementById('item-modal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+      
+      // Reset modal state
+      currentActionItemId = null;
+      
+      // Show form and hide comments section by default
+      const form = document.getElementById('new-item-form');
+      const commentsSection = document.querySelector('.item-details-section');
+      
+      if (form) form.style.display = 'block';
+      if (commentsSection) commentsSection.style.display = 'none';
+      
+      // Reset modal title
+      const title = document.getElementById('modal-title');
+      if (title) title.textContent = 'Action Item Details';
+      
+      // Clear form fields
+      const formElement = document.getElementById('new-item-form');
+      if (formElement) {
+        formElement.reset();
+      }
+      
+      // Clear comments
+      const commentsContainer = document.getElementById('comments-container');
+      if (commentsContainer) {
+        commentsContainer.innerHTML = '';
+      }
+      
+      // Clear new comment textarea
+      const newCommentTextarea = document.getElementById('new-comment');
+      if (newCommentTextarea) {
+        newCommentTextarea.value = '';
+      }
     }
     
     // Initialize event listeners
@@ -125,25 +180,38 @@
       debugButton.style.position = 'fixed';
       debugButton.style.bottom = '10px';
       debugButton.style.right = '10px';
-      debugButton.style.zIndex = '9999';
-      debugButton.style.padding = '8px 16px';
-      debugButton.style.backgroundColor = '#f44336';
-      debugButton.style.color = 'white';
-      debugButton.style.border = 'none';
-      debugButton.style.borderRadius = '4px';
-      debugButton.style.cursor = 'pointer';
-      debugButton.addEventListener('click', viewServerLogs);
-      document.body.appendChild(debugButton);
       
-      // Filter listeners
-      document.getElementById('status-filter').addEventListener('change', filterItems);
-      document.getElementById('search-input').addEventListener('input', filterItems);
-  
-      document.getElementById('status-filter-all').addEventListener('change', filterItems);
-      document.getElementById('search-input-all').addEventListener('input', filterItems);
+      // My Items filter listeners
+      document.getElementById('assignment-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('created-by-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('status-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('priority-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('due-date-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('category-filter').addEventListener('change', applyAdvancedFilters);
+      document.getElementById('search-input').addEventListener('input', applyAdvancedFilters);
+      document.getElementById('clear-filters-btn').addEventListener('click', clearAllFilters);
+      
+      // All Items filter listeners
+      document.getElementById('assignment-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('created-by-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('status-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('priority-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('due-date-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('category-filter-all').addEventListener('change', renderActionItems);
+      document.getElementById('search-input-all').addEventListener('input', renderActionItems);
+      document.getElementById('clear-filters-btn-all').addEventListener('click', clearAllFiltersAll);
       
       // Add comment button
       document.getElementById('add-comment-btn').addEventListener('click', addComment);
+      
+      // Activity feed event listeners
+      document.getElementById('refresh-feed-btn').addEventListener('click', loadActivityFeed);
+      document.getElementById('clear-feed-filters-btn').addEventListener('click', clearActivityFeedFilters);
+      
+      // Activity feed filter change listeners
+      document.getElementById('feed-filter-type').addEventListener('change', loadActivityFeed);
+      document.getElementById('feed-filter-timeframe').addEventListener('change', loadActivityFeed);
+      document.getElementById('feed-search').addEventListener('input', debounce(loadActivityFeed, 500));
       
       // Event delegation for action item buttons
       function handleActionItemClick(event) {
@@ -174,6 +242,135 @@
       renderActionItems();
     }
     
+    // Populate assignment filter with users who have actions assigned to them
+    function populateAssignmentFilter() {
+      const assignmentFilter = document.getElementById('assignment-filter');
+      const assignmentFilterAll = document.getElementById('assignment-filter-all');
+      if (!actionItems) return;
+      
+      // Get unique assigned users
+      const assignedUsers = new Set();
+      actionItems.forEach(item => {
+        if (item.assignedTo && item.assignedTo.trim()) {
+          assignedUsers.add(item.assignedTo.trim());
+        }
+      });
+      
+      // Update My Items assignment filter
+      if (assignmentFilter) {
+        // Clear and rebuild with base options first
+        assignmentFilter.innerHTML = `
+          <option value="all">All Assignments</option>
+          <option value="assigned-to-me">Assigned to Me</option>
+          <option value="unassigned">Unassigned</option>
+          <option value="assigned-to-others">Assigned to Others</option>
+        `;
+        // Add user-specific options
+        Array.from(assignedUsers).sort().forEach(user => {
+          const option = document.createElement('option');
+          option.value = user;
+          option.textContent = `Assigned to ${user}`;
+          assignmentFilter.appendChild(option);
+        });
+      }
+      
+      // Update All Items assignment filter
+      if (assignmentFilterAll) {
+        assignmentFilterAll.innerHTML = '<option value="all">All Assignments</option>';
+        Array.from(assignedUsers).sort().forEach(user => {
+          const option = document.createElement('option');
+          option.value = user;
+          option.textContent = `Assigned to ${user}`;
+          assignmentFilterAll.appendChild(option);
+        });
+      }
+      
+      console.log('Populated assignment filters with', assignedUsers.size, 'users:', Array.from(assignedUsers));
+    }
+    
+    // Populate created-by filter with users who have created actions
+    function populateCreatedByFilter() {
+      const createdByFilter = document.getElementById('created-by-filter');
+      const createdByFilterAll = document.getElementById('created-by-filter-all');
+      if (!actionItems) return;
+      
+      // Get unique creators
+      const creators = new Set();
+      actionItems.forEach(item => {
+        if (item.createdBy && item.createdBy.trim()) {
+          creators.add(item.createdBy.trim());
+        }
+      });
+      
+      // Update My Items created-by filter
+      if (createdByFilter) {
+        createdByFilter.innerHTML = '<option value="all">All Creators</option>';
+        Array.from(creators).sort().forEach(creator => {
+          const option = document.createElement('option');
+          option.value = creator;
+          option.textContent = `Created by ${creator}`;
+          createdByFilter.appendChild(option);
+        });
+      }
+      
+      // Update All Items created-by filter
+      if (createdByFilterAll) {
+        createdByFilterAll.innerHTML = '<option value="all">All Creators</option>';
+        Array.from(creators).sort().forEach(creator => {
+          const option = document.createElement('option');
+          option.value = creator;
+          option.textContent = `Created by ${creator}`;
+          createdByFilterAll.appendChild(option);
+        });
+      }
+      
+      console.log('Populated created-by filters with', creators.size, 'creators:', Array.from(creators));
+    }
+    
+    // Populate category filter with unique Level 1 categories from action items
+    function populateCategoryFilter() {
+      const categoryFilter = document.getElementById('category-filter');
+      const categoryFilterAll = document.getElementById('category-filter-all');
+      if (!actionItems) return;
+      
+      // Get unique Level 1 categories from action items
+      const categories = new Set();
+      actionItems.forEach(item => {
+        if (item.categoryPath) {
+          // Only get the first level (e.g., "Imaging" from "Imaging/X-ray/Ankle")
+          const pathParts = item.categoryPath.split('/');
+          const level1Category = pathParts[0]?.trim();
+          if (level1Category) {
+            categories.add(level1Category);
+          }
+        }
+      });
+      
+      // Update My Items category filter
+      if (categoryFilter) {
+        categoryFilter.innerHTML = '<option value="all">All Categories</option>';
+        Array.from(categories).sort().forEach(category => {
+          const option = document.createElement('option');
+          option.value = category;
+          option.textContent = category;
+          categoryFilter.appendChild(option);
+        });
+      }
+      
+      // Update All Items category filter
+      if (categoryFilterAll) {
+        categoryFilterAll.innerHTML = '<option value="all">All Categories</option>';
+        Array.from(categories).sort().forEach(category => {
+          const option = document.createElement('option');
+          option.value = category;
+          option.textContent = category;
+          categoryFilterAll.appendChild(option);
+        });
+      }
+      
+      console.log('Populated category filters with', categories.size, 'Level 1 categories:', Array.from(categories));
+    }
+    
     // Load action items
     function loadActionItems() {
       showSpinner('Loading action items...');
@@ -182,9 +379,26 @@
         .withSuccessHandler(function(items) {
           console.log('ITEMS RECEIVED FROM SERVER:', items);
           console.log('ITEMS TYPE:', typeof items);
-          console.log('ITEMS JSON:', JSON.stringify(items));
-          // alert('Action items received: ' + (items ? items.length : 'none') + '. Check console for details.');
+          console.log('ITEMS COUNT:', items ? items.length : 0);
+          
+          // Debug: Log each item's key fields
+          if (items && items.length > 0) {
+            items.forEach((item, index) => {
+              console.log(`Item ${index}:`, {
+                id: item.actionItemId,
+                title: item.title,
+                priority: item.priority,
+                status: item.status,
+                assignedTo: item.assignedTo,
+                categoryPath: item.categoryPath
+              });
+            });
+          }
+          
           actionItems = items;
+          populateAssignmentFilter(); // Populate assignment filter with actual users
+          populateCreatedByFilter(); // Populate created-by filter with actual creators
+          populateCategoryFilter(); // Populate category filter after loading items
           renderActionItems();
           hideSpinner();
         })
@@ -196,44 +410,31 @@
         .getAndProcessClientActionItems();
     }
     
-    function editActionItem(actionItemId) {
-      const item = actionItems.find(i => i.actionItemId === actionItemId);
-      if (!item) {
-        console.error('Action item not found for editing:', actionItemId);
-        return;
-      }
-
-      // Populate the modal with the item's data
-      document.getElementById('item-id').value = item.actionItemId;
-      document.getElementById('item-title').value = item.title;
-      document.getElementById('item-description').value = item.description;
-      document.getElementById('item-assigned-to').value = item.assignedTo;
-      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
-      document.getElementById('item-priority').value = item.priority;
-      document.getElementById('item-status').value = item.status;
-      document.getElementById('item-notes').value = item.notes;
-      
-      openNewItemModal();
-
-      // Handle category selection after modal is open and populated
-      if (item.categoryPath) {
-        const pathParts = item.categoryPath.split('/');
-        selectCategoryPath(pathParts);
-      }
-    }
+    // editActionItem function moved to line 891 - this duplicate removed
 
     async function selectCategoryPath(path) {
       if (!path || path.length === 0) return;
 
       // Ensure options are loaded before proceeding
-      if (!actionItemOptions || !actionItemOptions.actionItems) {
-        await new Promise(resolve => loadActionItemOptions(resolve));
+      if (!actionItemOptions || !actionItemOptions.actionItems || !actionItemOptions.actionItems.categories) {
+        console.log('Category data not loaded, loading now...');
+        await new Promise(resolve => {
+          loadActionItemOptions(() => {
+            console.log('Category data loaded, proceeding with selectCategoryPath');
+            resolve();
+          });
+        });
       }
 
       // Set the top-level category
-      const categorySelect = document.getElementById('item-category');
+      const categorySelect = document.getElementById('category-level-1');
+      if (!categorySelect) {
+        console.error('Category dropdown not found');
+        return;
+      }
       categorySelect.value = path[0];
-      categorySelect.dispatchEvent(new Event('change'));
+      console.log(`Setting category level 1 to: ${path[0]}`);
+      categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
 
       // Sequentially set the value for each subsequent dropdown
       for (let i = 1; i < path.length; i++) {
@@ -254,7 +455,8 @@
     function saveActionItem() {
       showSpinner('Saving action item...');
       
-      const path = [document.getElementById('item-category').value];
+      const categorySelect = document.getElementById('category-level-1');
+  const path = [categorySelect ? categorySelect.value : ''];
       const dynamicContainer = document.getElementById('dynamic-category-container');
       const dynamicSelects = dynamicContainer.querySelectorAll('select');
       dynamicSelects.forEach(select => {
@@ -267,11 +469,11 @@
         actionItemId: document.getElementById('item-id').value,
         title: document.getElementById('item-title').value,
         description: document.getElementById('item-description').value,
-        assignedTo: document.getElementById('item-assigned-to').value,
+        assignedTo: document.getElementById('item-assignee').value,
         dueDate: document.getElementById('item-due-date').value,
         priority: document.getElementById('item-priority').value,
         status: document.getElementById('item-status').value,
-        notes: document.getElementById('item-notes').value,
+        mentionedUsers: document.getElementById('item-mentions').value,
         categoryPath: path.filter(p => p).join('/'),
       };
       
@@ -350,6 +552,11 @@
     
     // Render action items
     function renderActionItems() {
+      console.log('RENDER: Starting renderActionItems');
+      console.log('RENDER: currentUser =', currentUser);
+      console.log('RENDER: currentTab =', currentTab);
+      console.log('RENDER: actionItems count =', actionItems ? actionItems.length : 0);
+      
       // Set current user each time we render to avoid race conditions
       currentUser = document.getElementById('user-email').textContent.trim();
       const myItemsContainer = document.getElementById('my-items-container');
@@ -359,6 +566,7 @@
       myItemsContainer.innerHTML = '';
       allItemsContainer.innerHTML = '';
       if (!actionItems || !Array.isArray(actionItems) || actionItems.length === 0) {
+        console.log('RENDER: No action items to render');
         myItemsContainer.innerHTML = '<div class="empty-state">No action items found</div>';
         allItemsContainer.innerHTML = '<div class="empty-state">No action items found</div>';
         return;
@@ -388,60 +596,570 @@
         }
         
         myItemsContainer.innerHTML = filteredItems.length > 0 
-          ? filteredItems.map(item => renderActionItemCard(item)).join('')
+          ? filteredItems.map(item => renderActionItem(item)).join('')
           : '<div class="empty-state">No action items found for you.</div>';
 
       } else if (currentTab === 'all-items') {
         let filteredItems = actionItems;
+        console.log('RENDER: All items - starting with', filteredItems.length, 'items');
 
+        const assignmentFilter = document.getElementById('assignment-filter-all').value;
+        const createdByFilter = document.getElementById('created-by-filter-all').value;
         const statusFilter = document.getElementById('status-filter-all').value;
+        const priorityFilter = document.getElementById('priority-filter-all').value;
+        const dueDateFilter = document.getElementById('due-date-filter-all').value;
+        const categoryFilter = document.getElementById('category-filter-all').value;
         const searchText = document.getElementById('search-input-all').value.toLowerCase();
+        console.log('RENDER: All items - filters:', { assignmentFilter, createdByFilter, statusFilter, priorityFilter, dueDateFilter, categoryFilter, searchText });
         
-        if (statusFilter !== 'all') {
-          filteredItems = filteredItems.filter(item => item.status === statusFilter);
+        // Assignment filter
+        if (assignmentFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => item.assignedTo === assignmentFilter);
+          console.log('RENDER: All items - assignment filter reduced items from', beforeCount, 'to', filteredItems.length);
         }
         
+        // Created By filter
+        if (createdByFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => item.createdBy === createdByFilter);
+          console.log('RENDER: All items - created-by filter reduced items from', beforeCount, 'to', filteredItems.length);
+        }
+        
+        // Status filter
+        if (statusFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => item.status === statusFilter);
+          console.log('RENDER: All items - status filter reduced items from', beforeCount, 'to', filteredItems.length);
+        }
+        
+        // Priority filter
+        if (priorityFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => item.priority === priorityFilter);
+          console.log('RENDER: All items - priority filter reduced items from', beforeCount, 'to', filteredItems.length);
+        }
+        
+        // Due Date filter
+        if (dueDateFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => matchesDueDateFilter(item.dueDate, dueDateFilter));
+          console.log('RENDER: All items - due date filter reduced items from', beforeCount, 'to', filteredItems.length);
+        }
+        
+        // Category filter (Level 1 only)
+        if (categoryFilter !== 'all') {
+          const beforeCount = filteredItems.length;
+          filteredItems = filteredItems.filter(item => {
+            const level1Category = item.categoryPath ? item.categoryPath.split('/')[0]?.trim() : '';
+            return level1Category === categoryFilter;
+          });
+          console.log('RENDER: All items - category filter reduced items from', beforeCount, 'to', filteredItems.length);
+        }
+        
+        // Search filter
         if (searchText) {
+          const beforeCount = filteredItems.length;
           filteredItems = filteredItems.filter(item => 
             (item.title && item.title.toLowerCase().includes(searchText)) ||
-            (item.description && item.description.toLowerCase().includes(searchText))
+            (item.description && item.description.toLowerCase().includes(searchText)) ||
+            (item.assignedTo && item.assignedTo.toLowerCase().includes(searchText)) ||
+            (item.categoryPath && item.categoryPath.toLowerCase().includes(searchText))
           );
+          console.log('RENDER: All items - search filter reduced items from', beforeCount, 'to', filteredItems.length);
         }
 
+        console.log('RENDER: All items - final filtered count:', filteredItems.length);
         allItemsContainer.innerHTML = filteredItems.length > 0 
-          ? filteredItems.map(item => renderActionItemCard(item)).join('')
+          ? filteredItems.map(item => renderActionItem(item)).join('')
           : '<div class="empty-state">No action items found.</div>';
       }
       
-      // Add click event listeners to item cards
-      document.querySelectorAll('.item-card').forEach(card => {
-        card.addEventListener('click', function(event) {
-          if (!event.target.closest('.item-actions')) {
-            const itemId = this.dataset.id;
+      // Add click event listeners to action items
+      document.querySelectorAll('.action-item').forEach(item => {
+        // Handle clicks on the item content (not action buttons)
+        item.addEventListener('click', function(event) {
+          if (!event.target.closest('.item-actions') && !event.target.closest('.item-checkbox')) {
+            const itemId = this.dataset.itemId;
             openItemDetails(itemId);
           }
         });
       });
+      
+      // Add click event listeners to action buttons
+      document.querySelectorAll('.action-btn').forEach(button => {
+        button.addEventListener('click', function(event) {
+          event.stopPropagation(); // Prevent item click
+          const action = this.dataset.action;
+          const itemElement = this.closest('.action-item');
+          const itemId = itemElement.dataset.itemId;
+          
+          handleActionItemClick(event, action, itemId);
+        });
+      });
     }
     
-    // Render a single action item card
-    function renderActionItemCard(item) {
+    // Handle action item button clicks
+    function handleActionItemClick(event, action, itemId) {
+      console.log('Action clicked:', action, 'for item:', itemId);
+      
+      switch (action) {
+        case 'edit':
+          editActionItem(itemId);
+          break;
+        case 'complete':
+          completeActionItem(itemId);
+          break;
+        case 'self-assign':
+          selfAssignItem(itemId);
+          break;
+        case 'comments':
+          openCommentsModal(itemId);
+          break;
+        case 'delete':
+          if (confirm('Are you sure you want to delete this action item?')) {
+            deleteActionItem(itemId);
+          }
+          break;
+        default:
+          console.warn('Unknown action:', action);
+      }
+    }
+    
+    // Complete an action item
+    function completeActionItem(itemId) {
+      showSpinner('Completing action item...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Item completed:', result);
+          loadActionItems(); // Refresh the list
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error completing item:', error);
+          hideSpinner();
+          alert('Error completing item: ' + error);
+        })
+        .completeActionItem(itemId);
+    }
+    
+    // Self-assign a single item
+    function selfAssignItem(itemId) {
+      const currentUser = getCurrentUserEmail();
+      
+      showSpinner('Self-assigning item...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Item self-assigned:', result);
+          loadActionItems(); // Refresh the list
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error self-assigning item:', error);
+          hideSpinner();
+          alert('Error self-assigning item: ' + error);
+        })
+        .assignActionItem(itemId, currentUser);
+    }
+    
+    // Open comments modal and load comments
+    function openCommentsModal(itemId) {
+      currentActionItemId = itemId;
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      if (!item) {
+        alert('Action item not found');
+        return;
+      }
+      
+      // Update modal title
+      const modalTitle = document.getElementById('modal-title');
+      if (modalTitle) {
+        modalTitle.textContent = `Comments - ${item.title}`;
+      }
+      
+      // Show the modal
+      const modal = document.getElementById('item-modal');
+      if (modal) {
+        modal.style.display = 'block';
+      }
+      
+      // Hide the form and show comments section (if they exist)
+      const form = document.getElementById('new-item-form');
+      if (form) {
+        form.style.display = 'none';
+      }
+      
+      const commentsSection = document.querySelector('.item-details-section');
+      if (commentsSection) {
+        commentsSection.style.display = 'block';
+      }
+      
+      // Clear previous comments and new comment field
+      document.getElementById('comments-container').innerHTML = '';
+      document.getElementById('new-comment').value = '';
+      
+      // Set up mentions autocomplete for the comment textarea (with delay to ensure modal is rendered)
+      setTimeout(() => {
+        console.log('Setting up mentions autocomplete for comments modal');
+        setupMentionsAutocomplete('new-comment');
+      }, 100);
+      
+      // Load comments for this item
+      loadCommentsForItem(itemId);
+    }
+    
+    // Simple test function to verify backend connectivity
+    function simpleTest() {
+      console.log('Testing simple backend function...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('SIMPLE TEST RESULT:', result);
+          alert('Simple test result: ' + JSON.stringify(result, null, 2));
+        })
+        .withFailureHandler(function(error) {
+          console.error('Simple test error:', error);
+          alert('Simple test error: ' + error);
+        })
+        .simpleTest();
+    }
+    
+    // Debug function to test comments sheet
+    function debugCommentsSheet() {
+      console.log('Testing comments sheet debug...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('DEBUG SHEET RESULT:', result);
+          alert('Debug result: ' + JSON.stringify(result, null, 2));
+        })
+        .withFailureHandler(function(error) {
+          console.error('Debug sheet error:', error);
+          alert('Debug error: ' + error);
+        })
+        .debugCommentsSheet();
+    }
+    
+    // Load comments for a specific action item
+    function loadCommentsForItem(itemId) {
+      console.log('Loading comments for item:', itemId);
+      showSpinner('Loading comments...');
+      
+      google.script.run
+        .withSuccessHandler(function(comments) {
+          console.log('Comments loaded:', comments);
+          console.log('Comments type:', typeof comments);
+          console.log('Comments length:', comments ? comments.length : 'null/undefined');
+          renderComments(comments);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading comments:', error);
+          hideSpinner();
+          alert('Error loading comments: ' + error);
+        })
+        .getCommentsForActionItem(itemId);
+    }
+    
+    // Render comments in the comments container
+    function renderComments(comments) {
+      const container = document.getElementById('comments-container');
+      
+      if (!comments || comments.length === 0) {
+        container.innerHTML = '<div class="empty-state">No comments yet. Be the first to add one!</div>';
+        return;
+      }
+      
+      const commentsHtml = comments.map(comment => {
+        const timestamp = new Date(comment.timestamp).toLocaleString();
+        const content = comment.content || '';
+        const author = comment.author || 'Unknown';
+        
+        // Process mentions in the comment content
+        const processedContent = processMentionsInText(content);
+        
+        return `
+          <div class="comment-item">
+            <div class="comment-header">
+              <span class="comment-author">${author}</span>
+              <span class="comment-timestamp">${timestamp}</span>
+            </div>
+            <div class="comment-content">${processedContent}</div>
+          </div>
+        `;
+      }).join('');
+      
+      container.innerHTML = commentsHtml;
+    }
+    
+    // Process @mentions in text and make them clickable
+    function processMentionsInText(text) {
+      if (!text) return '';
+      
+      // Replace @email mentions with styled spans
+      return text.replace(/@([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 
+        '<span class="mention">@$1</span>');
+    }
+    
+    // Add a new comment
+    function addComment() {
+      const commentText = document.getElementById('new-comment').value.trim();
+      
+      if (!commentText) {
+        alert('Please enter a comment');
+        return;
+      }
+      
+      if (!currentActionItemId) {
+        alert('No action item selected');
+        return;
+      }
+      
+      showSpinner('Adding comment...');
+      
+      const commentData = {
+        content: commentText,
+        author: getCurrentUserEmail()
+      };
+      
+      google.script.run
+        .withSuccessHandler(function(savedComment) {
+          console.log('Comment added:', savedComment);
+          document.getElementById('new-comment').value = ''; // Clear the textarea
+          loadCommentsForItem(currentActionItemId); // Reload comments
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding comment:', error);
+          hideSpinner();
+          alert('Error adding comment: ' + error);
+        })
+        .addCommentToActionItem(currentActionItemId, commentData);
+    }
+    
+    // Load activity feed with filters
+    function loadActivityFeed() {
+      showSpinner('Loading activity feed...');
+      
+      const filters = {
+        type: document.getElementById('feed-filter-type').value,
+        timeframe: document.getElementById('feed-filter-timeframe').value,
+        search: document.getElementById('feed-search').value.trim()
+      };
+      
+      console.log('Loading activity feed with filters:', filters);
+      
+      google.script.run
+        .withSuccessHandler(function(activities) {
+          console.log('Activity feed loaded:', activities);
+          renderActivityFeed(activities);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading activity feed:', error);
+          hideSpinner();
+          alert('Error loading activity feed: ' + error);
+        })
+        .getActivityFeed(filters);
+    }
+    
+    // Render activity feed items
+    function renderActivityFeed(activities) {
+      const container = document.getElementById('activity-feed-container');
+      
+      if (!activities || activities.length === 0) {
+        container.innerHTML = '<div class="empty-state">No recent activity found. Try adjusting your filters or check back later!</div>';
+        return;
+      }
+      
+      const activitiesHtml = activities.map(activity => {
+        const timestamp = new Date(activity.timestamp).toLocaleString();
+        const timeAgo = getTimeAgo(new Date(activity.timestamp));
+        const content = activity.content || '';
+        const author = activity.author || 'Unknown';
+        const actionItemTitle = activity.actionItemTitle || 'Unknown Item';
+        
+        // Process mentions in the content
+        const processedContent = processMentionsInText(content);
+        
+        let activityIcon = '';
+        let activityTypeClass = '';
+        let activityDescription = '';
+        
+        switch (activity.type) {
+          case 'comment':
+            activityIcon = '💬';
+            activityTypeClass = 'activity-comment';
+            activityDescription = `commented on`;
+            break;
+          case 'mention':
+            activityIcon = '👤';
+            activityTypeClass = 'activity-mention';
+            activityDescription = `mentioned ${activity.mentionedUsers ? activity.mentionedUsers.join(', ') : 'someone'} in`;
+            break;
+          case 'status-change':
+            activityIcon = '🔄';
+            activityTypeClass = 'activity-status';
+            activityDescription = `changed status of`;
+            break;
+          default:
+            activityIcon = '📝';
+            activityTypeClass = 'activity-other';
+            activityDescription = `updated`;
+        }
+        
+        return `
+          <div class="activity-item ${activityTypeClass}">
+            <div class="activity-icon">${activityIcon}</div>
+            <div class="activity-content">
+              <div class="activity-header">
+                <span class="activity-author">${author}</span>
+                <span class="activity-description">${activityDescription}</span>
+                <span class="activity-item-title" onclick="viewActionItem('${activity.actionItemId}')">${actionItemTitle}</span>
+                <span class="activity-timestamp" title="${timestamp}">${timeAgo}</span>
+              </div>
+              ${processedContent ? `<div class="activity-text">${processedContent}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      container.innerHTML = `<div class="activity-feed">${activitiesHtml}</div>`;
+    }
+    
+    // Get human-readable time ago string
+    function getTimeAgo(date) {
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (diffMins < 1) {
+        return 'just now';
+      } else if (diffMins < 60) {
+        return `${diffMins}m ago`;
+      } else if (diffHours < 24) {
+        return `${diffHours}h ago`;
+      } else if (diffDays < 7) {
+        return `${diffDays}d ago`;
+      } else {
+        return date.toLocaleDateString();
+      }
+    }
+    
+    // View action item from activity feed
+    function viewActionItem(itemId) {
+      // Switch to appropriate tab and highlight the item
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      if (!item) {
+        alert('Action item not found');
+        return;
+      }
+      
+      // Determine which tab the item should be in
+      const currentUser = getCurrentUserEmail();
+      const isMyItem = item.assignedTo === currentUser || 
+                      item.createdBy === currentUser ||
+                      (item.mentionedUsers && item.mentionedUsers.includes(currentUser));
+      
+      // Switch to the appropriate tab
+      const targetTab = isMyItem ? 'my-items' : 'all-items';
+      switchTab(targetTab);
+      
+      // Highlight the item (add a visual indicator)
+      setTimeout(() => {
+        const itemElement = document.querySelector(`[data-item-id="${itemId}"]`);
+        if (itemElement) {
+          itemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          itemElement.classList.add('highlighted-item');
+          setTimeout(() => {
+            itemElement.classList.remove('highlighted-item');
+          }, 3000);
+        }
+      }, 500);
+    }
+    
+    // Clear activity feed filters
+    function clearActivityFeedFilters() {
+      document.getElementById('feed-filter-type').value = 'all';
+      document.getElementById('feed-filter-timeframe').value = 'week';
+      document.getElementById('feed-search').value = '';
+      loadActivityFeed();
+    }
+    
+    // Debounce utility function
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+    
+    // Delete action item
+    function deleteActionItem(itemId) {
+      showSpinner('Deleting action item...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Item deleted:', result);
+          loadActionItems(); // Refresh the list
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error deleting item:', error);
+          hideSpinner();
+          alert('Error deleting item: ' + error);
+        })
+        .deleteActionItem(itemId);
+    }
+    
+    // Render a single action item
+    function renderActionItem(item) {
       const statusClass = getStatusClass(item.status);
+      const priorityClass = getPriorityClass(item.priority);
+      const isOverdue = item.dueDate && new Date(item.dueDate) < new Date();
+      const overdueClass = isOverdue ? 'overdue' : '';
       
       return `
-        <div class="item-card" data-id="${item.actionItemId}">
-          <div class="item-info">
-            <div class="item-title">${item.title}</div>
+        <div class="action-item ${overdueClass}" data-item-id="${item.actionItemId}">
+          <div class="item-checkbox">
+            <input type="checkbox" id="item-${item.actionItemId}" data-item-id="${item.actionItemId}">
+          </div>
+          <div class="item-content">
+            <div class="item-header">
+              <h3 class="item-title">${item.title}</h3>
+              <div class="item-badges">
+                <span class="status-badge ${statusClass}">${item.status}</span>
+                ${item.priority ? `<span class="priority-badge ${priorityClass}">${item.priority}</span>` : ''}
+                ${isOverdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
+              </div>
+            </div>
+            <p class="item-description">${item.description || ''}</p>
             <div class="item-meta">
-              <span class="status-badge ${statusClass}">${item.status}</span>
-              ${item.dueDate ? `<span>Due: ${formatDate(item.dueDate)}</span>` : ''}
-              ${item.assignedTo ? `<span>Assigned to: ${item.assignedTo}</span>` : ''}
+              <div class="meta-row">
+                <span class="item-category">${item.categoryPath || 'No category'}</span>
+                ${item.dueDate ? `<span class="item-due-date">Due: ${formatDate(item.dueDate)}</span>` : ''}
+              </div>
+              <div class="meta-row">
+                <span class="item-assignee">${item.assignedTo ? `Assigned to: ${item.assignedTo}` : 'Unassigned'}</span>
+                ${item.mentionedUsers ? `<span class="item-mentions">Mentions: ${item.mentionedUsers}</span>` : ''}
+              </div>
             </div>
           </div>
           <div class="item-actions">
-            <button class="action-btn" data-action="edit">Edit</button>
-            ${item.status !== 'Completed' ? `<button class="action-btn" data-action="complete">Complete</button>` : ''}
-            <button class="action-btn" data-action="delete">Delete</button>
+            <button class="action-btn primary" data-action="edit">Edit</button>
+            ${item.status !== 'Completed' ? `<button class="action-btn success" data-action="complete">Complete</button>` : ''}
+            ${!item.assignedTo || item.assignedTo === '' ? `<button class="action-btn secondary" data-action="self-assign">Self-Assign</button>` : ''}
+            <button class="action-btn" data-action="comments">Comments</button>
+            <button class="action-btn danger" data-action="delete">Delete</button>
           </div>
         </div>
       `;
@@ -452,8 +1170,19 @@
       switch (status) {
         case 'Open': return 'status-open';
         case 'In Progress': return 'status-in-progress';
+        case 'Updating': return 'status-in-progress';
         case 'Pending Approval': return 'status-pending';
         case 'Completed': return 'status-completed';
+        default: return '';
+      }
+    }
+    
+    // Get priority class
+    function getPriorityClass(priority) {
+      switch (priority) {
+        case 'High': return 'priority-high';
+        case 'Medium': return 'priority-medium';
+        case 'Low': return 'priority-low';
         default: return '';
       }
     }
@@ -534,7 +1263,7 @@
       document.getElementById('dynamic-category-container').innerHTML = ''; // Clear previous dynamic dropdowns
 
       // 2. Reset all fields to be editable by default
-      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'diagnosisCode', 'diagnosisName'];
+      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'mentions', 'diagnosisCode', 'diagnosisName'];
       fields.forEach(field => {
         const element = form.querySelector(`#item-${field.replace(/([A-Z])/g, '-$1').toLowerCase()}`);
         if (element) {
@@ -569,10 +1298,6 @@
 
       // Set modal title
       if (modalTitle) modalTitle.textContent = 'New Template';
-
-      // Set type to actionItems since we're not showing the type selection
-      const typeField = document.getElementById('item-type');
-      if (typeField) typeField.value = 'actionItems';
 
       // Set template flag
       const isTemplateField = document.getElementById('is-template');
@@ -612,12 +1337,13 @@
 
       // Fill form with item data
       document.getElementById('item-id').value = item.actionItemId;
-      document.getElementById('item-type').value = item.actionItemType;
+
       document.getElementById('item-status').value = item.status;
       document.getElementById('item-title').value = item.title;
       document.getElementById('item-description').value = item.description || '';
       document.getElementById('item-assignee').value = item.assignedTo || '';
       document.getElementById('item-due-date').value = item.dueDate ? formatDateForInput(item.dueDate) : '';
+      document.getElementById('item-mentions').value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : (item.mentionedUsers || '');
       document.getElementById('item-tags').value = item.tags ? item.tags.join(', ') : '';
 
       // Update category options based on item type
@@ -631,7 +1357,7 @@
         setTimeout(() => {
           // Set category if available
           if (pathParts.length > 0 && pathParts[0]) {
-            const categorySelect = document.getElementById('item-category');
+            const categorySelect = document.getElementById('category-level-1');
             setSelectOption(categorySelect, pathParts[0]);
             updateSubcategoryOptions();
 
@@ -744,22 +1470,44 @@
         return;
       }
 
-      // Populate the modal with the item's data
-      document.getElementById('item-id').value = item.actionItemId;
-      document.getElementById('item-title').value = item.title;
-      document.getElementById('item-description').value = item.description;
-      document.getElementById('item-assigned-to').value = item.assignedTo;
-      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
-      document.getElementById('item-priority').value = item.priority;
-      document.getElementById('item-status').value = item.status;
-      document.getElementById('item-notes').value = item.notes;
+      console.log('Editing action item:', item);
 
+      // Open the modal first
       openNewItemModal();
+
+      // Populate the modal with the item's data
+      document.getElementById('item-id').value = item.actionItemId || '';
+      document.getElementById('item-title').value = item.title || '';
+      document.getElementById('item-description').value = item.description || '';
+      document.getElementById('item-assignee').value = item.assignedTo || '';
+      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
+      document.getElementById('item-priority').value = item.priority || 'Medium';
+      document.getElementById('item-status').value = item.status || 'Open';
+  
+      // Populate other fields if they exist
+      const tagsField = document.getElementById('item-tags');
+      if (tagsField && item.tags) {
+        tagsField.value = Array.isArray(item.tags) ? item.tags.join(', ') : item.tags;
+      }
+  
+      const mentionsField = document.getElementById('item-mentions');
+      if (mentionsField && item.mentionedUsers) {
+        mentionsField.value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers;
+      }
 
       // Handle category selection after modal is open and populated
       if (item.categoryPath) {
+        console.log('Attempting to select category path:', item.categoryPath);
         const pathParts = item.categoryPath.split('/');
-        selectCategoryPath(pathParts);
+  
+        // Try to select the category path, but don't let it block the form population
+        setTimeout(() => {
+          try {
+            selectCategoryPath(pathParts);
+          } catch (error) {
+            console.warn('Failed to select category path, but form is still populated:', error);
+          }
+        }, 100); // Small delay to ensure modal is fully rendered
       }
     }
 
@@ -767,26 +1515,67 @@
       if (!path || path.length === 0) return;
 
       // Ensure options are loaded before proceeding
-      if (!actionItemOptions || !actionItemOptions.actionItems) {
-        await new Promise(resolve => loadActionItemOptions(resolve));
+      if (!actionItemOptions || !actionItemOptions.actionItems || !actionItemOptions.actionItems.categories) {
+        console.log('Category data not loaded, loading now...');
+        await new Promise(resolve => {
+          loadActionItemOptions(() => {
+            console.log('Category data loaded, proceeding with selectCategoryPath');
+            resolve();
+          });
+        });
       }
 
       // Set the top-level category
-      const categorySelect = document.getElementById('item-category');
+      const categorySelect = document.getElementById('category-level-1');
+      if (!categorySelect) {
+        console.error('Category dropdown not found');
+        return;
+      }
       categorySelect.value = path[0];
-      categorySelect.dispatchEvent(new Event('change'));
+      console.log(`Setting category level 1 to: ${path[0]}`);
+      categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
 
-      // Sequentially set the value for each subsequent dropdown
+      // Create all necessary dropdowns for the path
+      let currentCategories = actionItemOptions.actionItems.categories;
+      console.log('Available categories:', Object.keys(currentCategories || {}));
+      
       for (let i = 1; i < path.length; i++) {
         const level = i + 1;
-        // Wait for the next dropdown to be created by the change event
-        await new Promise(resolve => setTimeout(resolve, 50)); // Small delay to allow UI to update
-        const nextSelect = document.querySelector(`select[data-level='${level}']`);
-        if (nextSelect) {
-          nextSelect.value = path[i];
-          nextSelect.dispatchEvent(new Event('change'));
+        const pathValue = path[i];
+        const previousPathValue = path[i-1];
+        
+        console.log(`Looking for category '${previousPathValue}' in:`, Object.keys(currentCategories || {}));
+        
+        // Navigate to the subcategories for this level
+        if (currentCategories && currentCategories[previousPathValue]) {
+          currentCategories = currentCategories[previousPathValue].subcategories;
+          console.log(`Found subcategories for '${previousPathValue}':`, Object.keys(currentCategories || {}));
+          
+          if (currentCategories && Object.keys(currentCategories).length > 0) {
+            // Create the dropdown for this level if it doesn't exist
+            let nextSelect = document.querySelector(`select[data-level='${level}']`);
+            if (!nextSelect) {
+              console.log(`Creating dropdown for level ${level}`);
+              createCategoryDropdown(level, currentCategories);
+              nextSelect = document.querySelector(`select[data-level='${level}']`);
+            }
+            
+            // Set the value
+            if (nextSelect) {
+              nextSelect.value = pathValue;
+              console.log(`Set level ${level} to: ${pathValue}`);
+            } else {
+              console.error(`Failed to create dropdown for level ${level}`);
+              break;
+            }
+          } else {
+            console.log(`No subcategories available for level ${level}`);
+            break;
+          }
         } else {
-          console.error(`Could not find dropdown for level ${level} with value ${path[i]}`);
+          console.warn(`Category '${previousPathValue}' not found in current data structure. Available categories:`, Object.keys(currentCategories || {}));
+          // Don't break - just log the warning and continue
+          // This allows the form to still populate even if the category path is outdated
           break;
         }
       }
@@ -813,11 +1602,11 @@
         actionItemId: document.getElementById('item-id').value,
         title: document.getElementById('item-title').value,
         description: document.getElementById('item-description').value,
-        assignedTo: document.getElementById('item-assigned-to').value,
+        assignedTo: document.getElementById('item-assignee').value,
         dueDate: document.getElementById('item-due-date').value,
         priority: document.getElementById('item-priority').value,
         status: document.getElementById('item-status').value,
-        notes: document.getElementById('item-notes').value,
+        mentionedUsers: document.getElementById('item-mentions').value,
         categoryPath: pathParts.join('/'),
       };
 
@@ -836,22 +1625,307 @@
         .saveActionItem(item);
     }
 
-    // Add comment
+    // User autocomplete for mentions
+    let availableUsers = [];
+    let mentionDropdown = null;
+    
+    // Load users for admin functionality
+    function loadUsers() {
+      google.script.run
+        .withSuccessHandler(function(users) {
+          allUsers = users || [];
+          console.log('Loaded users:', allUsers.length);
+          populateUserDropdowns();
+          // Use the existing renderUsersTable function
+          if (typeof renderUsersTable === 'function') {
+            renderUsersTable(users);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading users:', error);
+          showError('Failed to load users: ' + error);
+        })
+        .getUsers();
+    }
+    
+    // Load notification groups for admin functionality
+    function loadNotificationGroups() {
+      google.script.run
+        .withSuccessHandler(function(groups) {
+          allGroups = groups || [];
+          console.log('Loaded notification groups:', allGroups.length);
+          // Use the existing renderGroupsTable function
+          if (typeof renderGroupsTable === 'function') {
+            renderGroupsTable(groups);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading notification groups:', error);
+          showError('Failed to load notification groups: ' + error);
+        })
+        .getNotificationGroups();
+    }
+    
+    // Load users for mentions autocomplete
+    function loadUsersForMentions() {
+      console.log('Loading users for mentions...');
+      google.script.run
+        .withSuccessHandler(function(users) {
+          availableUsers = users || [];
+          console.log('Loaded users for mentions:', availableUsers.length);
+          console.log('Available users:', availableUsers);
+          
+          // Initialize mentions autocomplete on all text areas after users are loaded
+          initializeMentionsOnAllFields();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading users for mentions:', error);
+        })
+        .getUsers();
+    }
+    
+    // Initialize mentions autocomplete on all relevant text fields
+    function initializeMentionsOnAllFields() {
+      console.log('Initializing mentions autocomplete on all fields...');
+      
+      // Initialize on comment textarea (when modal opens)
+      const commentField = document.getElementById('new-comment');
+      if (commentField) {
+        console.log('Setting up mentions on comment field');
+        setupMentionsAutocomplete('new-comment');
+      }
+      
+      // Initialize on description field
+      const descField = document.getElementById('item-description');
+      if (descField) {
+        console.log('Setting up mentions on description field');
+        setupMentionsAutocomplete('item-description');
+      }
+      
+      // Initialize on mentions field
+      const mentionsField = document.getElementById('item-mentions');
+      if (mentionsField) {
+        console.log('Setting up mentions on mentions field');
+        setupMentionsAutocomplete('item-mentions');
+      }
+    }
+    
+    // Setup mentions autocomplete for a textarea
+    function setupMentionsAutocomplete(textareaId) {
+      console.log('Setting up mentions autocomplete for:', textareaId);
+      const textarea = document.getElementById(textareaId);
+      if (!textarea) {
+        console.log('Textarea not found:', textareaId);
+        return;
+      }
+      
+      console.log('Adding input listener to:', textareaId);
+      textarea.addEventListener('input', function(e) {
+        const text = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        
+        console.log('Input detected:', text, 'cursor at:', cursorPos);
+        
+        // Find @ symbol before cursor
+        const beforeCursor = text.substring(0, cursorPos);
+        const atIndex = beforeCursor.lastIndexOf('@');
+        
+        console.log('Before cursor:', beforeCursor, 'at index:', atIndex);
+        
+        if (atIndex !== -1) {
+          const afterAt = beforeCursor.substring(atIndex + 1);
+          console.log('After @:', afterAt);
+          
+          // Check if we're in the middle of a mention (no spaces after @)
+          if (!afterAt.includes(' ') && afterAt.length >= 0) {
+            console.log('Showing mention dropdown with query:', afterAt);
+            console.log('Available users count:', availableUsers.length);
+            showMentionDropdown(textarea, atIndex, afterAt);
+            return;
+          }
+        }
+        
+        hideMentionDropdown();
+      });
+      
+      textarea.addEventListener('keydown', function(e) {
+        if (mentionDropdown && mentionDropdown.style.display === 'block') {
+          const items = mentionDropdown.querySelectorAll('.mention-item');
+          const selected = mentionDropdown.querySelector('.mention-item.selected');
+          
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectNextMention(items, selected);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectPrevMention(items, selected);
+          } else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            if (selected) {
+              insertMention(textarea, selected.dataset.email);
+            }
+          } else if (e.key === 'Escape') {
+            hideMentionDropdown();
+          }
+        }
+      });
+    }
+    
+    // Show mention dropdown
+    function showMentionDropdown(textarea, atIndex, query) {
+      console.log('showMentionDropdown called with query:', query);
+      console.log('Available users:', availableUsers);
+      
+      if (!mentionDropdown) {
+        console.log('Creating mention dropdown');
+        createMentionDropdown();
+      }
+      
+      // Filter users based on query
+      const filteredUsers = availableUsers.filter(user => {
+        const fullName = user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.name || user.displayName || user.email;
+        const email = user.email || '';
+        const displayName = user.name || user.displayName || '';
+        
+        console.log('Checking user:', user);
+        
+        return fullName.toLowerCase().includes(query.toLowerCase()) || 
+               email.toLowerCase().includes(query.toLowerCase()) ||
+               displayName.toLowerCase().includes(query.toLowerCase());
+      }).slice(0, 5); // Limit to 5 results
+      
+      console.log('Filtered users:', filteredUsers);
+      
+      if (filteredUsers.length === 0) {
+        console.log('No filtered users, hiding dropdown');
+        hideMentionDropdown();
+        return;
+      }
+      
+      // Populate dropdown
+      mentionDropdown.innerHTML = '';
+      filteredUsers.forEach((user, index) => {
+        const item = document.createElement('div');
+        item.className = 'mention-item' + (index === 0 ? ' selected' : '');
+        item.dataset.email = user.email;
+        
+        const fullName = user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.name || user.displayName || user.email;
+        const displayName = user.name || fullName || user.email;
+        item.innerHTML = `
+          <div class="mention-name">${displayName}</div>
+          <div class="mention-email">${user.email}</div>
+        `;
+        
+        item.addEventListener('click', () => {
+          insertMention(textarea, user.email);
+        });
+        
+        mentionDropdown.appendChild(item);
+      });
+      
+      // Position dropdown with better positioning
+      const rect = textarea.getBoundingClientRect();
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      
+      mentionDropdown.style.position = 'fixed';
+      mentionDropdown.style.left = rect.left + 'px';
+      mentionDropdown.style.top = (rect.bottom + 5) + 'px';
+      mentionDropdown.style.zIndex = '9999';
+      mentionDropdown.style.display = 'block';
+      mentionDropdown.style.maxWidth = '300px';
+      mentionDropdown.style.minWidth = '200px';
+      
+      console.log('Dropdown positioned at:', {
+        left: rect.left,
+        top: rect.bottom + 5,
+        display: mentionDropdown.style.display,
+        zIndex: mentionDropdown.style.zIndex
+      });
+      console.log('Dropdown element:', mentionDropdown);
+    }
+    
+    // Create mention dropdown element
+    function createMentionDropdown() {
+      mentionDropdown = document.createElement('div');
+      mentionDropdown.className = 'mention-dropdown';
+      mentionDropdown.style.display = 'none';
+      document.body.appendChild(mentionDropdown);
+    }
+    
+    // Hide mention dropdown
+    function hideMentionDropdown() {
+      if (mentionDropdown) {
+        mentionDropdown.style.display = 'none';
+      }
+    }
+    
+    // Insert mention into textarea
+    function insertMention(textarea, email) {
+      const text = textarea.value;
+      const cursorPos = textarea.selectionStart;
+      const beforeCursor = text.substring(0, cursorPos);
+      const afterCursor = text.substring(cursorPos);
+      
+      const atIndex = beforeCursor.lastIndexOf('@');
+      const beforeAt = text.substring(0, atIndex);
+      
+      textarea.value = beforeAt + '@' + email + ' ' + afterCursor;
+      textarea.focus();
+      
+      const newCursorPos = atIndex + email.length + 2;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      
+      hideMentionDropdown();
+    }
+    
+    // Navigation helpers
+    function selectNextMention(items, selected) {
+      if (!selected) {
+        items[0]?.classList.add('selected');
+      } else {
+        selected.classList.remove('selected');
+        const next = selected.nextElementSibling || items[0];
+        next.classList.add('selected');
+      }
+    }
+    
+    function selectPrevMention(items, selected) {
+      if (!selected) {
+        items[items.length - 1]?.classList.add('selected');
+      } else {
+        selected.classList.remove('selected');
+        const prev = selected.previousElementSibling || items[items.length - 1];
+        prev.classList.add('selected');
+      }
+    }
+    
+    // Add comment (fixed version)
     function addComment() {
-      const itemId = document.getElementById('item-details-content').dataset.itemId; // Get item ID from details view
-      const commentContent = document.getElementById('new-comment').value;
-
-      if (!commentContent.trim()) {
+      const commentText = document.getElementById('new-comment').value.trim();
+      
+      if (!commentText) {
         alert('Please enter a comment');
         return;
       }
-
+      
+      if (!currentActionItemId) {
+        alert('No action item selected');
+        return;
+      }
+      
       showSpinner('Adding comment...');
-
+      
+      const commentData = {
+        content: commentText,
+        author: getCurrentUserEmail()
+      };
+      
       google.script.run
-        .withSuccessHandler(function() {
-          document.getElementById('new-comment').value = '';
-          loadComments(itemId);
+        .withSuccessHandler(function(savedComment) {
+          console.log('Comment added:', savedComment);
+          document.getElementById('new-comment').value = ''; // Clear the textarea
+          loadCommentsForItem(currentActionItemId); // Reload comments
           hideSpinner();
         })
         .withFailureHandler(function(error) {
@@ -859,7 +1933,7 @@
           hideSpinner();
           alert('Error adding comment: ' + error);
         })
-        .addCommentToActionItem(itemId, { content: commentContent });
+        .addCommentToActionItem(currentActionItemId, commentData);
     }
 
     // Show spinner
@@ -887,8 +1961,8 @@
           <div class="item-info">
             <div class="item-title">${template.title}</div>
             <div class="item-meta">
-              <span>${template.actionItemType}</span>
               ${template.categoryPath ? `<span>Category: ${template.categoryPath}</span>` : ''}
+              ${template.priority ? `<span>Priority: ${template.priority}</span>` : ''}
             </div>
           </div>
           <div class="item-actions">
@@ -927,6 +2001,47 @@
       });
     }
     
+    // Helper function to calculate due date from timeframe
+    function calculateDueDateFromTimeframe(timeframe) {
+      if (!timeframe) return '';
+      
+      const now = new Date();
+      const timeframeStr = timeframe.toString().toLowerCase().trim();
+      
+      // Parse different timeframe formats
+      let days = 0;
+      
+      if (timeframeStr.includes('day')) {
+        const match = timeframeStr.match(/(\d+)\s*days?/);
+        if (match) days = parseInt(match[1]);
+      } else if (timeframeStr.includes('week')) {
+        const match = timeframeStr.match(/(\d+)\s*weeks?/);
+        if (match) days = parseInt(match[1]) * 7;
+      } else if (timeframeStr.includes('month')) {
+        const match = timeframeStr.match(/(\d+)\s*months?/);
+        if (match) days = parseInt(match[1]) * 30; // Approximate
+      } else if (timeframeStr.includes('hour')) {
+        const match = timeframeStr.match(/(\d+)\s*hours?/);
+        if (match) {
+          const hours = parseInt(match[1]);
+          if (hours < 24) days = 1; // Same day if less than 24 hours
+          else days = Math.ceil(hours / 24);
+        }
+      } else {
+        // Try to parse as just a number (assume days)
+        const match = timeframeStr.match(/^(\d+)$/);
+        if (match) days = parseInt(match[1]);
+      }
+      
+      if (days > 0) {
+        const dueDate = new Date(now);
+        dueDate.setDate(dueDate.getDate() + days);
+        return dueDate.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+      }
+      
+      return '';
+    }
+    
     // Function to use a template's data to populate the form
     function useTemplate(templateData) {
       console.log('Populating form from template data:', templateData);
@@ -937,13 +2052,18 @@
       form.querySelector('#item-description').value = templateData.description || '';
       form.querySelector('#item-status').value = templateData.defaultStatus || 'Open';
       form.querySelector('#item-priority').value = templateData.defaultPriority || 'Medium';
-      form.querySelector('#item-assignee').value = templateData.defaultAssignedTo || '';
+      form.querySelector('#item-assignee').value = templateData.defaultAssignee || '';
       form.querySelector('#item-tags').value = templateData.defaultTags || '';
+      form.querySelector('#item-mentions').value = templateData.defaultMentions || '';
       form.querySelector('#item-diagnosis-code').value = templateData.diagnosisCode || '';
       form.querySelector('#item-diagnosis-name').value = templateData.diagnosisName || '';
+      
+      // Calculate and populate due date from defaultDueTimeframe
+      const calculatedDueDate = calculateDueDateFromTimeframe(templateData.defaultDueTimeframe);
+      form.querySelector('#item-due-date').value = calculatedDueDate;
 
       // --- Editability Logic ---
-      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'diagnosisCode', 'diagnosisName'];
+      const fields = ['title', 'description', 'status', 'priority', 'assignee', 'tags', 'mentions', 'diagnosisCode', 'diagnosisName'];
       fields.forEach(field => {
         const element = form.querySelector(`#item-${field.replace(/([A-Z])/g, '-$1').toLowerCase()}`);
         // Correctly check for the readOnly property, e.g., 'readOnly_title'
@@ -1022,7 +2142,7 @@
           <div class="tree-node">
             <div class="tree-node-content">
               ${(hasSubcategories || hasOptions) ? `<span class="tree-node-toggle">+</span>` : '<span class="tree-node-toggle" style="visibility:hidden">+</span>'}
-              <span class="tree-node-label">${category.displayName}</span>
+              <span class="tree-node-label">${category.title}</span>
             </div>
             ${(hasSubcategories || hasOptions) ? `
               <div class="tree-node-children">
@@ -1031,7 +2151,7 @@
                   <div class="tree-node option-node">
                     <div class="tree-node-content">
                       <span class="tree-node-toggle" style="visibility:hidden">+</span>
-                      <span class="tree-node-label">${option.displayName || option}</span>
+                      <span class="tree-node-label">${option.title || option}</span>
                     </div>
                   </div>
                 `).join('') : ''}
@@ -1047,14 +2167,17 @@
     function generateActionItemHTML(item) {
       let html = `
         <div class="action-item" data-id="${item.id}">
-          <div class="item-header">
-            <span class="item-title">${item.title}</span>
-            <div class="item-actions">
-              <button class="edit-btn">Edit</button>
-              <button class="complete-btn">Complete</button>
-              <button class="delete-btn">Delete</button>
-            </div>
-          </div>
+          <div class="admin-actions">
+          <button class="btn btn-primary" onclick="loadUsers()">
+            <i class="fas fa-users"></i> Users
+          </button>
+          <button class="btn btn-secondary" onclick="loadGroups()">
+            <i class="fas fa-user-friends"></i> Groups
+          </button>
+          <button class="btn btn-info" onclick="loadMemberships()">
+            <i class="fas fa-link"></i> Memberships
+          </button>
+        </div>
           <div class="item-body">
             <p>${item.description}</p>
             <p><strong>Status:</strong> ${item.status}</p>
@@ -1076,8 +2199,879 @@
     });
 
     // =================================================================================
-    // CASCADING TAXONOMY LOGIC
+// CARE COORDINATOR WORKFLOW FUNCTIONS
+// =================================================================================
+
+// Advanced filtering for Care Coordinator workflow
+function applyAdvancedFilters() {
+  const assignmentFilter = document.getElementById('assignment-filter').value;
+  const createdByFilter = document.getElementById('created-by-filter').value;
+  const statusFilter = document.getElementById('status-filter').value;
+  const priorityFilter = document.getElementById('priority-filter').value;
+  const dueDateFilter = document.getElementById('due-date-filter').value;
+  const categoryFilter = document.getElementById('category-filter').value;
+  const searchTerm = document.getElementById('search-input').value.toLowerCase();
+  
+  console.log('Applying filters:', { assignmentFilter, createdByFilter, statusFilter, priorityFilter, dueDateFilter, categoryFilter, searchTerm });
+      
+  const container = document.getElementById('my-items-container');
+  const items = container.querySelectorAll('.action-item');
+      
+  items.forEach(item => {
+    let show = true;
+    const itemId = item.dataset.itemId;
+    const itemData = actionItems.find(i => i.actionItemId === itemId);
+    
+    if (!itemData) {
+      console.warn('Item data not found for:', itemId);
+      item.style.display = 'none';
+      return;
+    }
+    
+    // Assignment filter
+    if (assignmentFilter !== 'all') {
+      const currentUser = getCurrentUserEmail();
+      const assignedTo = itemData.assignedTo;
+      
+      switch (assignmentFilter) {
+        case 'assigned-to-me':
+          show = show && (assignedTo === currentUser);
+          break;
+        case 'unassigned':
+          show = show && (!assignedTo || assignedTo === '');
+          break;
+        case 'assigned-to-others':
+          show = show && (assignedTo && assignedTo !== currentUser);
+          break;
+        default:
+          // Handle specific user assignment (e.g., "john@example.com")
+          show = show && (assignedTo === assignmentFilter);
+          break;
+      }
+    }
+    
+    // Created By filter
+    if (createdByFilter !== 'all') {
+      show = show && (itemData.createdBy === createdByFilter);
+    }
+        
+        // Status filter
+        if (statusFilter !== 'all') {
+          show = show && (itemData.status === statusFilter);
+        }
+        
+        // Priority filter
+        if (priorityFilter !== 'all') {
+          show = show && (itemData.priority === priorityFilter);
+        }
+        
+        // Due date filter
+        if (dueDateFilter !== 'all') {
+          show = show && matchesDueDateFilter(itemData.dueDate, dueDateFilter);
+        }
+        
+        // Category filter (Level 1 only)
+        if (categoryFilter !== 'all') {
+          const level1Category = itemData.categoryPath ? itemData.categoryPath.split('/')[0]?.trim() : '';
+          show = show && (level1Category === categoryFilter);
+        }
+        
+        // Search filter
+        if (searchTerm) {
+          const searchableText = (
+            itemData.title + ' ' + 
+            itemData.description + ' ' + 
+            itemData.assignedTo + ' ' + 
+            itemData.categoryPath
+          ).toLowerCase();
+          show = show && searchableText.includes(searchTerm);
+        }
+        
+        item.style.display = show ? 'block' : 'none';
+      });
+      
+      updateFilterResultsCount();
+    }
+    
+    // Helper function to extract item data from DOM element
+    function getItemDataFromElement(itemElement) {
+      return {
+        actionItemId: itemElement.dataset.itemId,
+        title: itemElement.querySelector('.item-title')?.textContent || '',
+        description: itemElement.querySelector('.item-description')?.textContent || '',
+        status: itemElement.querySelector('.item-status')?.textContent || '',
+        priority: itemElement.querySelector('.item-priority')?.textContent || '',
+        assignedTo: itemElement.querySelector('.item-assignee')?.textContent || '',
+        dueDate: itemElement.querySelector('.item-due-date')?.textContent || '',
+        categoryPath: itemElement.querySelector('.item-category')?.textContent || ''
+      };
+    }
+    
+    // Helper function to match due date filters
+    function matchesDueDateFilter(dueDate, filter) {
+      if (!dueDate) return false;
+      
+      const itemDate = new Date(dueDate);
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (filter) {
+        case 'overdue':
+          return itemDate < todayStart;
+        case 'today':
+          return itemDate.toDateString() === today.toDateString();
+        case 'this-week':
+          const weekEnd = new Date(todayStart);
+          weekEnd.setDate(weekEnd.getDate() + 7);
+          return itemDate >= todayStart && itemDate < weekEnd;
+        case 'next-week':
+          const nextWeekStart = new Date(todayStart);
+          nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+          const nextWeekEnd = new Date(nextWeekStart);
+          nextWeekEnd.setDate(nextWeekEnd.getDate() + 7);
+          return itemDate >= nextWeekStart && itemDate < nextWeekEnd;
+        default:
+          return true;
+      }
+    }
+    
+    // Clear all filters for My Items tab
+    function clearAllFilters() {
+      document.getElementById('assignment-filter').value = 'all';
+      document.getElementById('created-by-filter').value = 'all';
+      document.getElementById('status-filter').value = 'all';
+      document.getElementById('priority-filter').value = 'all';
+      document.getElementById('due-date-filter').value = 'all';
+      document.getElementById('category-filter').value = 'all';
+      document.getElementById('search-input').value = '';
+      applyAdvancedFilters();
+    }
+
+    // Clear all filters for All Items tab
+    function clearAllFiltersAll() {
+      document.getElementById('assignment-filter-all').value = 'all';
+      document.getElementById('created-by-filter-all').value = 'all';
+      document.getElementById('status-filter-all').value = 'all';
+      document.getElementById('priority-filter-all').value = 'all';
+      document.getElementById('due-date-filter-all').value = 'all';
+      document.getElementById('category-filter-all').value = 'all';
+      document.getElementById('search-input-all').value = '';
+      renderActionItems();
+    }
+    
+    // Self-assign selected items
+    function selfAssignSelected() {
+      const selectedItems = document.querySelectorAll('.action-item input[type="checkbox"]:checked');
+      if (selectedItems.length === 0) {
+        alert('Please select items to self-assign.');
+        return;
+      }
+      
+      const currentUser = getCurrentUserEmail();
+      const itemIds = Array.from(selectedItems).map(checkbox => checkbox.closest('.action-item').dataset.itemId);
+      
+      if (confirm(`Self-assign ${itemIds.length} item(s) to yourself?`)) {
+        bulkAssignItems(itemIds, currentUser);
+      }
+    }
+    
+    // Bulk assign items
+    function bulkAssignItems(itemIds, assignee) {
+      showSpinner('Assigning items...');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Items assigned:', result);
+          loadActionItems(); // Refresh the list
+          hideSpinner();
+          alert(`Successfully assigned ${itemIds.length} item(s).`);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error assigning items:', error);
+          hideSpinner();
+          alert('Error assigning items: ' + error);
+        })
+        .bulkAssignItems(itemIds, assignee);
+    }
+    
+    // Get current user email
+    function getCurrentUserEmail() {
+      return currentUser || 'unknown@example.com'; // Fallback
+    }
+    
+    // Ensure category data is loaded before proceeding
+    function ensureCategoryDataLoaded() {
+      return new Promise((resolve, reject) => {
+        // Check if data is already loaded
+        if (actionItemOptions && actionItemOptions.actionItems && actionItemOptions.actionItems.categories) {
+          console.log('Category data already loaded');
+          resolve();
+          return;
+        }
+        
+        console.log('Category data not loaded, loading now...');
+        
+        // Load the data
+        loadActionItemOptions(() => {
+          // Double-check that data is now loaded
+          if (actionItemOptions && actionItemOptions.actionItems && actionItemOptions.actionItems.categories) {
+            console.log('Category data successfully loaded');
+            resolve();
+          } else {
+            console.error('Failed to load category data');
+            reject(new Error('Failed to load category data'));
+          }
+        });
+      });
+    }
+    
+    // Update filter results count
+    function updateFilterResultsCount() {
+      const container = document.getElementById('my-items-container');
+      const visibleItems = container.querySelectorAll('.action-item:not([style*="display: none"])');
+      const totalItems = container.querySelectorAll('.action-item');
+      
+      // Add or update results count display
+      let countDisplay = document.getElementById('filter-results-count');
+      if (!countDisplay) {
+        countDisplay = document.createElement('div');
+        countDisplay.id = 'filter-results-count';
+        countDisplay.style.cssText = 'margin: 10px 0; font-size: 14px; color: #666;';
+        container.parentNode.insertBefore(countDisplay, container);
+      }
+      
+      countDisplay.textContent = `Showing ${visibleItems.length} of ${totalItems.length} items`;
+    }
+    
+    // Apply filters for All Items tab (legacy function)
+    function applyFiltersAll() {
+      const statusFilter = document.getElementById('status-filter-all').value;
+      const searchTerm = document.getElementById('search-input-all').value.toLowerCase();
+      
+      const container = document.getElementById('all-items-container');
+      const items = container.querySelectorAll('.action-item');
+      
+      items.forEach(item => {
+        let show = true;
+        const itemData = getItemDataFromElement(item);
+        
+        // Status filter
+        if (statusFilter !== 'all') {
+          show = show && (itemData.status === statusFilter);
+        }
+        
+        // Search filter
+        if (searchTerm) {
+          const searchableText = (
+            itemData.title + ' ' + 
+            itemData.description + ' ' + 
+            itemData.assignedTo + ' ' + 
+            itemData.categoryPath
+          ).toLowerCase();
+          show = show && searchableText.includes(searchTerm);
+        }
+        
+        item.style.display = show ? 'block' : 'none';
+      });
+    }
+    
     // =================================================================================
+    // ADMIN FUNCTIONS
+    // =================================================================================
+    
+    // Load users for admin management
+    function loadUsers() {
+      const tbody = document.getElementById('users-table-body');
+      tbody.innerHTML = '<tr><td colspan="4">Loading users...</td></tr>';
+      
+      google.script.run
+        .withSuccessHandler(function(users) {
+          console.log('Users loaded:', users);
+          displayUsers(users);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading users:', error);
+          tbody.innerHTML = '<tr><td colspan="4">Error loading users: ' + error + '</td></tr>';
+        })
+        .getUsers();
+    }
+    
+    // Display users in the admin table
+    function displayUsers(users) {
+      const tbody = document.getElementById('users-table-body');
+      
+      if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No users found.</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = users.map(user => {
+        // Handle both new and legacy field names
+        const email = user.email || '';
+        const firstName = user.firstName || user.staffFirstName || '';
+        const lastName = user.lastName || user.staffLastName || '';
+        const displayName = user.displayName || 
+                          (firstName && lastName ? `${firstName} ${lastName}`.trim() : 
+                          user.name || email.split('@')[0]);
+        const role = (user.role || 'user').toLowerCase();
+        const isActive = user.active !== undefined ? user.active : 
+                        (user.Isactive !== undefined ? user.Isactive : true);
+        
+        return `
+          <tr data-email="${email}" class="${isActive ? '' : 'inactive-user'}">
+            <td>${displayName || 'N/A'}</td>
+            <td>${email}</td>
+            <td>${firstName}</td>
+            <td>${lastName}</td>
+            <td>${role.charAt(0).toUpperCase() + role.slice(1)}</td>
+            <td>${isActive ? 'Active' : 'Inactive'}</td>
+            <td class="actions">
+              <button class="secondary-btn" onclick="editUser('${email}')">Edit</button>
+              <button class="danger-btn" onclick="deleteUser('${email}')">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+    
+    // Load groups for admin management
+    function loadGroups() {
+      const tbody = document.getElementById('groups-table-body');
+      tbody.innerHTML = '<tr><td colspan="4">Loading groups...</td></tr>';
+      
+      google.script.run
+        .withSuccessHandler(function(groups) {
+          console.log('Groups loaded:', groups);
+          displayGroups(groups);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading groups:', error);
+          tbody.innerHTML = '<tr><td colspan="4">Error loading groups: ' + error + '</td></tr>';
+        })
+        .getNotificationGroups();
+    }
+    
+    // Display groups in the admin table
+    function displayGroups(groups) {
+      const tbody = document.getElementById('groups-table-body');
+      
+      if (!groups || groups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No groups found.</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = groups.map(group => `
+        <tr>
+          <td>${group.groupName || 'N/A'}</td>
+          <td>${group.groupId || 'N/A'}</td>
+          <td>${group.webhookUrl ? 'Configured' : 'Not configured'}</td>
+          <td>
+            <button class="secondary-btn" onclick="editGroup('${group.groupId}')">Edit</button>
+            <button class="danger-btn" onclick="deleteGroup('${group.groupId}')">Delete</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+    
+    // Admin modal functions
+    function showUserModal(isEdit = false, userData = null) {
+      console.log('showUserModal called with:', { isEdit, userData });
+      const modal = document.getElementById('user-modal');
+      const title = document.getElementById('user-modal-title');
+      const form = document.getElementById('user-form');
+      
+      if (!modal || !title || !form) {
+        console.error('Required modal elements not found:', { 
+          modal: !!modal, 
+          title: !!title, 
+          form: !!form
+        });
+        return;
+      }
+      
+      // Get all form fields first
+      const editEmailInput = document.getElementById('edit-email') || {};
+      const emailInput = document.getElementById('user-email-input');
+      const firstNameInput = document.getElementById('user-first-name');
+      const lastNameInput = document.getElementById('user-last-name');
+      const displayNameInput = document.getElementById('user-display-name');
+      const roleSelectElement = document.getElementById('user-role');
+      const webhookInput = document.getElementById('user-webhook');
+      const activeCheckboxElement = document.getElementById('user-active');
+      
+      // Reset the form and set up initial state
+      form.reset();
+      
+      // Set up email field state based on add/edit mode
+      if (emailInput) {
+        if (isEdit) {
+          // When editing, disable the email field
+          emailInput.disabled = true;
+          emailInput.required = false;
+          // Clear the hidden edit-email field
+          if (editEmailInput) editEmailInput.value = '';
+        } else {
+          // When adding, enable the email field and make it required
+          emailInput.disabled = false;
+          emailInput.required = true;
+          emailInput.value = ''; // Clear any previous value
+        }
+      }
+      
+      if (isEdit && userData) {
+        console.log('Editing user with data:', JSON.stringify(userData, null, 2));
+        title.textContent = 'Edit User';
+        
+        // Set all fields from userData with fallbacks for legacy field names
+        const email = userData.email || '';
+        const firstName = userData.firstName || userData.staffFirstName || '';
+        const lastName = userData.lastName || userData.staffLastName || '';
+        const displayName = userData.displayName || 
+                          (firstName && lastName ? `${firstName} ${lastName}`.trim() : 
+                          userData.name || (email ? email.split('@')[0] : ''));
+        
+        // Set email field with debug logging
+      console.log('Setting email field. emailInput exists:', !!emailInput, 'email:', email);
+      
+      // Set the hidden email field for form submission
+      if (editEmailInput) {
+        console.log('Setting editEmailInput value to:', email);
+        editEmailInput.value = email;
+      }
+      
+      // Set the email input field
+      if (emailInput) {
+        console.log('Setting email input value to:', email);
+        emailInput.value = email;
+        
+        // Disable email field when editing
+        if (isEdit) {
+          emailInput.disabled = true;
+        } else {
+          emailInput.disabled = false;
+          emailInput.required = true;
+        }
+        
+        // Make sure the input is visible
+        emailInput.style.display = 'block';
+        emailInput.style.visibility = 'visible';
+        emailInput.style.opacity = '1';
+        
+        // Find and show the form group in the modal
+        const formGroup = emailInput.closest('.form-group');
+        if (formGroup) {
+          console.log('Found form group in modal:', formGroup);
+          formGroup.style.display = 'block';
+          formGroup.style.visibility = 'visible';
+          formGroup.style.opacity = '1';
+          formGroup.style.height = 'auto';
+          formGroup.style.overflow = 'visible';
+        }
+      } else {
+        console.error('Email input element not found');
+      }
+        
+        // Ensure the modal content is visible
+        const modalContent = document.querySelector('#user-modal .modal-content');
+        if (modalContent) {
+          modalContent.style.display = 'block';
+          console.log('Modal content made visible');
+        }
+        
+        // Set other fields
+        if (firstNameInput) firstNameInput.value = firstName || '';
+        if (lastNameInput) lastNameInput.value = lastName || '';
+        if (displayNameInput) displayNameInput.value = displayName || '';
+        
+        // Set role, defaulting to 'user' if not specified (lowercase for consistency)
+        if (roleSelectElement) {
+          roleSelectElement.value = (userData.role || 'user').toLowerCase();
+        }
+        
+        // Set webhook URL (check both possible property names)
+        if (webhookInput) {
+          webhookInput.value = userData.webhookUrl || userData.Chatwebhook || '';
+        }
+        
+        // Set active status (default to true if not specified)
+        if (activeCheckboxElement) {
+          const isActive = userData.active !== undefined ? userData.active : 
+                         (userData.Isactive !== undefined ? userData.Isactive : true);
+          activeCheckboxElement.checked = isActive;
+        }
+        
+        // Disable email field when editing
+        if (emailInput) {
+          emailInput.disabled = true;
+        }
+      } else {
+        console.log('Adding new user');
+        title.textContent = 'Add User';
+        
+        // Enable and clear the email field for new users
+        const emailInput = document.getElementById('user-email');
+        if (emailInput) {
+          emailInput.disabled = false;
+          emailInput.value = '';
+          emailInput.required = true;
+          
+          // Make sure the email field is visible and enabled
+          emailInput.style.display = 'block';
+          emailInput.style.visibility = 'visible';
+          emailInput.style.opacity = '1';
+          
+          // Make sure the form group is visible
+          const formGroup = emailInput.closest('.form-group');
+          if (formGroup) {
+            formGroup.style.display = 'block';
+            formGroup.style.visibility = 'visible';
+            formGroup.style.opacity = '1';
+            formGroup.style.height = 'auto';
+            formGroup.style.overflow = 'visible';
+          }
+        }
+        
+        // Set default active state
+        const activeCheckbox = document.getElementById('user-active');
+        if (activeCheckbox) {
+          activeCheckbox.checked = true;
+        }
+      }
+      
+      // Show the modal
+      modal.style.display = 'block';
+    }
+    
+    function closeUserModal() {
+      document.getElementById('user-modal').style.display = 'none';
+    }
+    
+    function showGroupModal(isEdit = false, groupData = null) {
+      const modal = document.getElementById('group-modal');
+      const title = document.getElementById('group-modal-title');
+      const form = document.getElementById('group-form');
+      
+      // Reset form
+      form.reset();
+      document.getElementById('edit-group-name').value = '';
+      
+      if (isEdit && groupData) {
+        title.textContent = 'Edit Group';
+        document.getElementById('edit-group-name').value = groupData.groupName;
+        document.getElementById('group-name').value = groupData.groupName;
+        document.getElementById('group-id').value = groupData.groupId || '';
+        document.getElementById('group-webhook').value = groupData.webhookUrl || '';
+        
+        // Disable group name field when editing
+        document.getElementById('group-name').disabled = true;
+      } else {
+        title.textContent = 'Create Group';
+        document.getElementById('group-name').disabled = false;
+      }
+      
+      // Load user checkboxes for group membership
+      populateGroupMemberCheckboxes(groupData ? groupData.members : []);
+      
+      modal.style.display = 'block';
+    }
+    
+    function closeGroupModal() {
+      document.getElementById('group-modal').style.display = 'none';
+    }
+    
+    function populateGroupMemberCheckboxes(selectedMembers = []) {
+      const container = document.getElementById('group-members-checkboxes');
+      container.innerHTML = '<p>Loading users...</p>';
+      
+      google.script.run
+        .withSuccessHandler(function(users) {
+          if (!users || users.length === 0) {
+            container.innerHTML = '<p>No users available</p>';
+            return;
+          }
+          
+          container.innerHTML = users.map(user => {
+            const isSelected = selectedMembers.includes(user.email);
+            return `
+              <label class="checkbox-item">
+                <input type="checkbox" value="${user.email}" ${isSelected ? 'checked' : ''}>
+                ${user.firstName && user.lastName ? user.firstName + ' ' + user.lastName : user.name || user.displayName || user.email} (${user.email})
+              </label>
+            `;
+          }).join('');
+        })
+        .withFailureHandler(function(error) {
+          container.innerHTML = '<p>Error loading users: ' + error + '</p>';
+        })
+        .getUsers();
+    }
+    
+    function showConfirmModal(message, onConfirm) {
+      document.getElementById('confirm-message').textContent = message;
+      const modal = document.getElementById('confirm-modal');
+      const confirmBtn = document.getElementById('confirm-action-btn');
+      
+      // Remove existing event listeners
+      const newConfirmBtn = confirmBtn.cloneNode(true);
+      confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+      
+      // Add new event listener
+      newConfirmBtn.addEventListener('click', function() {
+        onConfirm();
+        closeConfirmModal();
+      });
+      
+      modal.style.display = 'block';
+    }
+    
+    function closeConfirmModal() {
+      document.getElementById('confirm-modal').style.display = 'none';
+    }
+    
+    // Admin UI event handlers
+    function editUser(email) {
+      // Find user data and show edit modal
+      google.script.run
+        .withSuccessHandler(function(users) {
+          const user = users.find(u => u.email === email);
+          if (user) {
+            showUserModal(true, user);
+          } else {
+            alert('User not found');
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error loading user data: ' + error);
+        })
+        .getUsers();
+    }
+    
+    function deleteUser(email) {
+      showConfirmModal(
+        `Are you sure you want to delete user: ${email}? This action cannot be undone.`,
+        function() {
+          google.script.run
+            .withSuccessHandler(function() {
+              alert('User deleted successfully');
+              loadUsers();
+            })
+            .withFailureHandler(function(error) {
+              alert('Error deleting user: ' + error);
+            })
+            .deleteUser(email);
+        }
+      );
+    }
+    
+    function editGroup(groupId) {
+      // Find group data and show edit modal
+      google.script.run
+        .withSuccessHandler(function(groups) {
+          const group = groups.find(g => g.groupId === groupId);
+          if (group) {
+            showGroupModal(true, group);
+          } else {
+            alert('Group not found');
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error loading group data: ' + error);
+        })
+        .getNotificationGroups();
+    }
+    
+    function deleteGroup(groupId) {
+      showConfirmModal(
+        `Are you sure you want to delete group: ${groupId}? This action cannot be undone.`,
+        function() {
+          google.script.run
+            .withSuccessHandler(function() {
+              alert('Group deleted successfully');
+              loadGroups();
+            })
+            .withFailureHandler(function(error) {
+              alert('Error deleting group: ' + error);
+            })
+            .deleteGroup(groupId);
+        }
+      );
+    }
+    
+    // Save user function
+    function saveUser() {
+      const saveBtn = document.getElementById('save-user-btn');
+      const originalBtnText = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      
+      // Get form values with null checks and safe trimming
+      const emailInput = document.getElementById('user-email-input');
+      const firstNameInput = document.getElementById('user-first-name');
+      const lastNameInput = document.getElementById('user-last-name');
+      const displayNameInput = document.getElementById('user-display-name');
+      const roleSelect = document.getElementById('user-role');
+      const webhookInput = document.getElementById('user-webhook');
+      const activeCheckbox = document.getElementById('user-active');
+      const editEmailInput = document.getElementById('edit-email');
+      
+      // Debug: Log all form field values
+      console.log('Form field values:', {
+        emailInput: emailInput ? emailInput.value : 'null',
+        firstNameInput: firstNameInput ? firstNameInput.value : 'null',
+        lastNameInput: lastNameInput ? lastNameInput.value : 'null',
+        displayNameInput: displayNameInput ? displayNameInput.value : 'null',
+        roleSelect: roleSelect ? roleSelect.value : 'null',
+        webhookInput: webhookInput ? webhookInput.value : 'null',
+        activeCheckbox: activeCheckbox ? activeCheckbox.checked : 'null',
+        editEmailInput: editEmailInput ? editEmailInput.value : 'null'
+      });
+      
+      // Get values with null checks and safe trimming
+      let email = '';
+      if (editEmailInput && editEmailInput.value) {
+        // If editing, use the edit-email field
+        email = editEmailInput.value.trim();
+      } else if (emailInput) {
+        // If adding new, use the user-email field
+        email = emailInput.value ? emailInput.value.trim() : '';
+      }
+      const firstName = firstNameInput ? (firstNameInput.value || '').trim() : '';
+      const lastName = lastNameInput ? (lastNameInput.value || '').trim() : '';
+      let displayName = displayNameInput ? (displayNameInput.value || '').trim() : '';
+      const role = roleSelect ? (roleSelect.value || 'user').toLowerCase() : 'user';
+      const webhookUrl = webhookInput ? (webhookInput.value || '').trim() : '';
+      const active = activeCheckbox ? activeCheckbox.checked : true;
+      const isEdit = editEmailInput && editEmailInput.value !== '';
+      
+      console.log('Form values:', {
+        email,
+        firstName,
+        lastName,
+        displayName,
+        role,
+        webhookUrl,
+        active,
+        isEdit,
+        emailInputExists: !!emailInput,
+        emailInputValue: emailInput ? emailInput.value : 'undefined',
+        emailInputId: emailInput ? emailInput.id : 'undefined',
+        emailInputDisabled: emailInput ? emailInput.disabled : 'undefined',
+        emailInputStyle: emailInput ? JSON.stringify(emailInput.style) : 'undefined'
+      });
+      
+      // Basic validation
+      if (!email) {
+        alert('Email is required');
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        return;
+      }
+      
+      if (!firstName || !lastName) {
+        alert('First name and last name are required');
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        return;
+      }
+      
+      // Generate displayName if not provided
+      if (!displayName) {
+        displayName = `${firstName} ${lastName}`.trim();
+      }
+      
+      const userData = {
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        displayName: displayName,
+        role: role,
+        webhookUrl: webhookUrl,
+        active: active,
+        // Include legacy field names for backward compatibility
+        staffFirstName: firstName,
+        staffLastName: lastName,
+        Chatwebhook: webhookUrl,
+        Isactive: active
+      };
+      
+      showSpinner('Saving user...');
+      
+      if (isEdit) {
+        const originalEmail = document.getElementById('edit-email').value;
+        google.script.run
+          .withSuccessHandler(function() {
+            hideSpinner();
+            closeUserModal();
+            loadUsers();
+            loadUsersForMentions();
+          })
+          .withFailureHandler(function(error) {
+            hideSpinner();
+            console.error('Error updating user:', error);
+            alert('Error updating user: ' + (error.message || 'Unknown error'));
+          })
+          .saveUser(userData);
+      } else {
+        google.script.run
+          .withSuccessHandler(function() {
+            hideSpinner();
+            closeUserModal();
+            loadUsers();
+            loadUsersForMentions();
+          })
+          .withFailureHandler(function(error) {
+            hideSpinner();
+            console.error('Error adding user:', error);
+            alert('Error adding user: ' + (error.message || 'Unknown error'));
+          })
+          .saveUser(userData);
+      }
+    }
+    
+    // Save group function
+    function saveGroup() {
+      const saveBtn = document.getElementById('save-group-btn');
+      const originalBtnText = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      
+      const isEdit = document.getElementById('edit-group-name').value !== '';
+      const selectedMembers = Array.from(document.querySelectorAll('#group-members-checkboxes input[type="checkbox"]:checked'))
+        .map(cb => cb.value);
+      
+      const groupData = {
+        groupName: document.getElementById('group-name').value,
+        groupId: document.getElementById('group-id').value,
+        webhookUrl: document.getElementById('group-webhook').value,
+        members: selectedMembers,
+        originalName: isEdit ? document.getElementById('edit-group-name').value : null
+      };
+      
+      // Validation
+      if (!groupData.groupName) {
+        alert('Group name is required.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Group saved:', result);
+          closeGroupModal();
+          loadGroups();
+          alert(isEdit ? 'Group updated successfully' : 'Group created successfully');
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error saving group:', error);
+          alert('Error saving group: ' + error);
+        })
+        .withFinally(function() {
+          saveBtn.disabled = false;
+          saveBtn.textContent = originalBtnText;
+        })
+        .saveGroup(groupData, isEdit);
+    }
 
     /**
      * This is the single entry point for handling a selection on ANY category dropdown.
@@ -1161,7 +3155,7 @@
       for (const key in options) {
         const option = document.createElement('option');
         option.value = key;
-        option.textContent = options[key].displayName || key;
+        option.textContent = options[key].title || key;
         select.appendChild(option);
       }
 
@@ -1193,9 +3187,822 @@
         const category = categories[categoryKey];
         const option = document.createElement('option');
         option.value = categoryKey;
-        option.textContent = category.displayName || categoryKey;
+        option.textContent = category.title || categoryKey;
         categorySelect.appendChild(option);
       }
       categorySelect.disabled = false;
     }
-  </script>
+    
+    // ===== ADMIN FUNCTIONALITY =====
+    
+    // Initialize admin functionality
+    function initAdmin() {
+      google.script.run
+        .withSuccessHandler(function(isAdminUser) {
+          console.log('Admin check result:', isAdminUser);
+          if (isAdminUser) {
+            // Show the admin tab button
+            const adminTabButton = document.getElementById('admin-tab');
+            if (adminTabButton) {
+              adminTabButton.style.display = 'block';
+              console.log('Admin tab button shown');
+            }
+            
+            // Load admin data when admin access is confirmed
+            setTimeout(() => {
+              loadUsers();
+              loadGroups();
+            }, 100);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error checking admin status:', error);
+        })
+        .isAdmin();
+        
+      // Set up event listeners for admin buttons
+      document.getElementById('add-user-btn')?.addEventListener('click', function() {
+        showUserModal(false);
+      });
+      
+      document.getElementById('refresh-users-btn')?.addEventListener('click', loadUsers);
+      
+      document.getElementById('add-group-btn')?.addEventListener('click', function() {
+        showGroupModal(false);
+      });
+      
+      document.getElementById('refresh-groups-btn')?.addEventListener('click', loadGroups);
+      
+      // Webhook test button
+      console.log('Initializing webhook test button...');
+      const testWebhookBtn = document.getElementById('test-webhook-btn');
+      console.log('Button element:', testWebhookBtn);
+      
+      if (testWebhookBtn) {
+        console.log('Found webhook test button, adding click handler');
+        
+        // Store a reference to the button for debugging
+        window.testWebhookBtn = testWebhookBtn;
+        
+        // Add click handler with detailed logging
+        testWebhookBtn.addEventListener('click', function(e) {
+          console.log('Webhook test button clicked', e);
+          console.log('Button text:', e.target.textContent);
+          console.log('Button id:', e.target.id);
+          console.log('Button classList:', e.target.classList);
+          console.log('Button parent:', e.target.parentElement);
+          
+          try {
+            console.log('Calling showWebhookTestUI...');
+            showWebhookTestUI();
+            console.log('showWebhookTestUI called successfully');
+          } catch (error) {
+            console.error('Error in webhook test button click handler:', error);
+            showToast('Error: ' + (error.message || 'Unknown error'), 'error');
+          }
+        });
+        
+        // Add a test click handler to verify the button is clickable
+        testWebhookBtn.addEventListener('mousedown', function() {
+          console.log('Webhook test button mousedown event');
+        });
+        
+        // Make the button more visible for testing
+        testWebhookBtn.style.border = '2px solid red';
+        testWebhookBtn.style.padding = '8px 16px';
+        testWebhookBtn.style.borderRadius = '4px';
+        
+        console.log('Webhook test button initialization complete');
+      } else {
+        console.error('Could not find webhook test button. Searching for any buttons with similar IDs...');
+        
+        // Debug: Find all buttons in the document
+        const allButtons = document.querySelectorAll('button');
+        console.log('All buttons on page:', allButtons);
+        
+        // Debug: Find any elements with 'webhook' in the ID
+        const webhookElements = document.querySelectorAll('[id*="webhook"], [class*="webhook"]');
+        console.log('Elements with "webhook" in ID or class:', webhookElements);
+        
+        showToast('Could not find webhook test button', 'error');
+      }
+      
+      document.getElementById('refresh-webhook-btn')?.addEventListener('click', function() {
+        loadUsers();
+        showToast('Users refreshed', 'success');
+      });
+      
+      // User form submission
+      const userForm = document.getElementById('user-form');
+      if (userForm) {
+        userForm.addEventListener('submit', function(e) {
+          e.preventDefault();
+          saveUser();
+        });
+      } else {
+        console.error('User form not found');
+      }
+      
+      document.getElementById('group-form')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveGroup();
+      });
+      
+      // Set up modal close handlers
+      document.querySelectorAll('.close-modal').forEach(closeBtn => {
+        closeBtn.addEventListener('click', function() {
+          this.closest('.modal').style.display = 'none';
+        });
+      });
+      
+      // Close modals when clicking outside
+      window.addEventListener('click', function(event) {
+        if (event.target.classList.contains('modal')) {
+          event.target.style.display = 'none';
+        }
+      });
+      
+      document.getElementById('add-membership-btn')?.addEventListener('click', showAddMembershipModal);
+      document.getElementById('refresh-memberships-btn')?.addEventListener('click', loadMemberships);
+    }
+    
+    // Show webhook test UI
+    function showWebhookTestUI() {
+      console.log('showWebhookTestUI called');
+      
+      // Show loading state
+      showToast('Loading webhook test tool...', 'info');
+      
+      // First, verify we can call the server
+      console.log('Testing server connection...');
+      google.script.run
+        .withSuccessHandler(function(testResult) {
+          console.log('Server connection test successful:', testResult);
+          
+          // Now try to load the webhook test UI
+          console.log('Loading webhook test UI...');
+          google.script.run
+            .withSuccessHandler(function(html) {
+              console.log('Received webhook test UI HTML:', html ? 'HTML received' : 'Empty HTML');
+              
+              // Create a modal for the webhook test UI
+              const modal = document.createElement('div');
+              modal.id = 'webhook-test-modal';
+              modal.className = 'modal';
+              
+              // Create modal content
+              const modalContent = document.createElement('div');
+              modalContent.className = 'modal-content';
+              modalContent.style.maxWidth = '800px';
+              modalContent.style.maxHeight = '90vh';
+              modalContent.style.overflow = 'auto';
+              
+              // Add close button
+              const closeBtn = document.createElement('span');
+              closeBtn.className = 'close-modal';
+              closeBtn.innerHTML = '&times;';
+              closeBtn.onclick = function() {
+                console.log('Closing webhook test modal');
+                modal.remove();
+              };
+              
+              // Add content
+              modalContent.appendChild(closeBtn);
+              
+              // Check if we got valid HTML
+              if (html && typeof html === 'string' && html.trim() !== '') {
+                modalContent.insertAdjacentHTML('beforeend', html);
+                
+                // Initialize the webhook test UI
+                try {
+                  console.log('Initializing webhook test UI');
+                  // The WebhookTestUI.html has its own initialization code
+                } catch (e) {
+                  console.error('Error initializing webhook test UI:', e);
+                  showToast('Error initializing webhook test UI', 'error');
+                }
+              } else {
+                console.error('Invalid or empty HTML received for webhook test UI');
+                modalContent.insertAdjacentHTML('beforeend', 
+                  '<h2>Error</h2><p>Could not load webhook test tool. Please try again or check the logs.</p>');
+              }
+              
+              // Add to modal and then to body
+              modal.appendChild(modalContent);
+              document.body.appendChild(modal);
+              
+              // Show the modal
+              modal.style.display = 'block';
+              console.log('Webhook test modal displayed');
+              
+              // Close modal when clicking outside
+              modal.onclick = function(event) {
+                if (event.target === modal) {
+                  console.log('Closing webhook test modal (click outside)');
+                  modal.remove();
+                }
+              };
+            })
+            .withFailureHandler(function(error) {
+              console.error('Error loading webhook test UI:', error);
+              showErrorModal('Error loading webhook test UI', error);
+            })
+            .showWebhookTestUI();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Server connection test failed:', error);
+          showErrorModal('Could not connect to server', error);
+        })
+        .testClientServerCommunication();
+    }
+    
+    // Helper function to show error modal
+    function showErrorModal(title, error) {
+      let errorMessage = title;
+      
+      if (error && error.message) {
+        errorMessage += ': ' + error.message;
+      }
+      
+      showToast(errorMessage, 'error');
+      
+      // Create a fallback modal with the error
+      const modal = document.createElement('div');
+      modal.id = 'webhook-test-error-modal';
+      modal.className = 'modal';
+      modal.style.display = 'block';
+      
+      const modalContent = document.createElement('div');
+      modalContent.className = 'modal-content';
+      modalContent.style.maxWidth = '600px';
+      modalContent.innerHTML = `
+        <span class="close-modal" onclick="this.closest('.modal').remove()">&times;</span>
+        <h2>${title}</h2>
+        <p>${errorMessage}</p>
+        <p>Please check the browser console for more details.</p>
+        <div class="button-group" style="margin-top: 20px;">
+          <button class="secondary-btn" onclick="this.closest('.modal').remove()">Close</button>
+        </div>
+      `;
+      
+      modal.appendChild(modalContent);
+      document.body.appendChild(modal);
+      
+      // Close on outside click
+      modal.onclick = function(event) {
+        if (event.target === modal) {
+          modal.remove();
+        }
+      };
+    }
+    
+    // Show toast notification
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      // Auto-remove after 3 seconds
+      setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => {
+          toast.remove();
+        }, 300);
+      }, 3000);
+    }
+    
+    // Load users table
+    function loadUsers() {
+      showSpinner('Loading users...');
+      google.script.run
+        .withSuccessHandler(function(users) {
+          renderUsersTable(users);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading users:', error);
+          hideSpinner();
+          alert('Error loading users: ' + error);
+        })
+        .getUsers();
+    }
+    
+    // Render users table
+    function renderUsersTable(users) {
+      const tbody = document.getElementById('users-table-body');
+      if (!tbody) return;
+      
+      tbody.innerHTML = '';
+      users.forEach(user => {
+        if (!user.isGroup) { // Only show actual users, not groups
+          const row = document.createElement('tr');
+          const email = user.email || user.Email || '';
+          const name = user.name || user.displayName || 
+                     (user.firstName && user.lastName ? `${user.firstName} ${user.lastName}`.trim() : 
+                     email ? email.split('@')[0] : 'N/A');
+          
+          row.innerHTML = `
+            <td>${name}</td>
+            <td>${email || 'N/A'}</td>
+            <td>${(user.role || 'user').toLowerCase()}</td>
+            <td>
+              <button class="action-btn edit-btn" onclick="editUser('${email}')">Edit</button>
+              <button class="action-btn delete-btn" onclick="deleteUser('${email}')">Delete</button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        }
+      });
+    }
+    
+    // Load groups table
+    function loadGroups() {
+      showSpinner('Loading groups...');
+      google.script.run
+        .withSuccessHandler(function(groups) {
+          renderGroupsTable(groups);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading groups:', error);
+          hideSpinner();
+          alert('Error loading groups: ' + error);
+        })
+        .getNotificationGroups();
+    }
+    
+    // Render groups table
+    function renderGroupsTable(groups) {
+      const tbody = document.getElementById('groups-table-body');
+      if (!tbody) return;
+      
+      tbody.innerHTML = '';
+      groups.forEach(group => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${group.groupName}</td>
+          <td>${group.groupId}</td>
+          <td>${group.webhookUrl ? group.webhookUrl.substring(0, 50) + '...' : 'Not set'}</td>
+          <td>
+            <button class="action-btn edit-btn" onclick="editGroup('${group.groupName}')">Edit</button>
+            <button class="action-btn delete-btn" onclick="deleteGroup('${group.groupName}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+    
+    // Load memberships table
+    function loadMemberships() {
+      showSpinner('Loading memberships...');
+      google.script.run
+        .withSuccessHandler(function(memberships) {
+          renderMembershipsTable(memberships);
+          hideSpinner();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading memberships:', error);
+          hideSpinner();
+          alert('Error loading memberships: ' + error);
+        })
+        .getGroupMemberships();
+    }
+    
+    // Render memberships table
+    function renderMembershipsTable(memberships) {
+      const tbody = document.getElementById('memberships-table-body');
+      if (!tbody) return;
+      
+      tbody.innerHTML = '';
+      memberships.forEach(membership => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${membership.userEmail}</td>
+          <td>${membership.groupName}</td>
+          <td>
+            <button class="action-btn delete-btn" onclick="deleteMembership('${membership.userEmail}', '${membership.groupName}')">Remove</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+    
+    // Show add user modal
+    function showAddUserModal() {
+      const name = prompt('Enter user name:');
+      if (!name) return;
+      
+      const email = prompt('Enter user email:');
+      if (!email) return;
+      
+      const role = prompt('Enter user role (admin, provider, staff, user):', 'user');
+      if (!role) return;
+      
+      addUser(name, email, role);
+    }
+    
+    // Add user
+    function addUser(name, email, role) {
+      showSpinner('Adding user...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          hideSpinner();
+          alert('User added successfully!');
+          loadUsers();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding user:', error);
+          hideSpinner();
+          alert('Error adding user: ' + error);
+        })
+        .addUser(name, email, role);
+    }
+    
+    // Edit user
+    function editUser(email) {
+      console.log('editUser called with email:', email);
+      showSpinner('Loading user data...');
+      
+      // Fetch the user data directly from the server
+      google.script.run
+        .withSuccessHandler(function(user) {
+          hideSpinner();
+          if (user) {
+            console.log('User data loaded:', user);
+            showUserModal(true, user);
+          } else {
+            alert('User not found');
+          }
+        })
+        .withFailureHandler(function(error) {
+          hideSpinner();
+          console.error('Error loading user:', error);
+          alert('Error loading user: ' + error.message);
+        })
+        .getUserByEmail(email);
+    }
+    
+    // Update user
+    function updateUser(email, name, role) {
+      showSpinner('Updating user...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          hideSpinner();
+          alert('User updated successfully!');
+          loadUsers();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error updating user:', error);
+          hideSpinner();
+          alert('Error updating user: ' + error);
+        })
+        .updateUser(email, name, role);
+    }
+    
+    // Delete user
+    function deleteUser(email, name = '') {
+      // Show confirmation modal
+      showConfirmModal(
+        `Are you sure you want to delete ${name ? `user <strong>${name}</strong> (${email})` : 'this user'}? This action cannot be undone.`,
+        function() {
+          // This function runs when user confirms
+          showSpinner('Deleting user...');
+          google.script.run
+            .withSuccessHandler(function(result) {
+              hideSpinner();
+              showToast('User deleted successfully!', 'success');
+              loadUsers();
+            })
+            .withFailureHandler(function(error) {
+              console.error('Error deleting user:', error);
+              hideSpinner();
+              showErrorModal('Error Deleting User', error);
+            })
+            .deleteUser(email);
+        }
+      );
+    }
+    
+    // Show add group modal
+    function showAddGroupModal() {
+      const groupName = prompt('Enter group name:');
+      if (!groupName) return;
+      
+      const groupId = prompt('Enter group ID:');
+      if (!groupId) return;
+      
+      const webhookUrl = prompt('Enter webhook URL (optional):') || '';
+      
+      addGroup(groupName, groupId, webhookUrl);
+    }
+    
+    // Add group
+    function addGroup(groupName, groupId, webhookUrl) {
+      showSpinner('Adding group...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          hideSpinner();
+          alert('Group added successfully!');
+          loadGroups();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding group:', error);
+          hideSpinner();
+          alert('Error adding group: ' + error);
+        })
+        .addNotificationGroup(groupName, groupId, webhookUrl);
+    }
+    
+    // Edit group
+    function editGroup(groupName) {
+      const newGroupId = prompt('Enter new group ID:');
+      if (newGroupId === null) return;
+      
+      const newWebhookUrl = prompt('Enter new webhook URL:') || '';
+      
+      updateGroup(groupName, newGroupId, newWebhookUrl);
+    }
+    
+    // Update group
+    function updateGroup(groupName, groupId, webhookUrl) {
+      showSpinner('Updating group...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          hideSpinner();
+          alert('Group updated successfully!');
+          loadGroups();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error updating group:', error);
+          hideSpinner();
+          alert('Error updating group: ' + error);
+        })
+        .updateNotificationGroup(groupName, groupId, webhookUrl);
+    }
+    
+    // Delete group
+    function deleteGroup(groupName, groupId = '') {
+      // Show confirmation modal
+      showConfirmModal(
+        `Are you sure you want to delete the group <strong>${groupName}</strong>${groupId ? ` (${groupId})` : ''}? This action cannot be undone and will remove all group memberships.`,
+        function() {
+          // This function runs when user confirms
+          showSpinner('Deleting group...');
+          google.script.run
+            .withSuccessHandler(function(result) {
+              hideSpinner();
+              showToast('Group deleted successfully!', 'success');
+              loadGroups();
+              loadMemberships(); // Refresh memberships as they may be affected
+            })
+            .withFailureHandler(function(error) {
+              console.error('Error deleting group:', error);
+              hideSpinner();
+              showErrorModal('Error Deleting Group', error);
+            })
+            .deleteNotificationGroup(groupName);
+        }
+      );
+    }
+    
+    // Show add membership modal
+    function showAddMembershipModal() {
+      // Create modal HTML
+      const modalHtml = `
+        <div class="modal fade" id="addMembershipModal" tabindex="-1" aria-labelledby="addMembershipModalLabel" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="addMembershipModalLabel">Add New Membership</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <form id="addMembershipForm">
+                  <div class="mb-3">
+                    <label for="userEmail" class="form-label">User</label>
+                    <select class="form-select" id="userEmail" required>
+                      <option value="" selected disabled>Select a user...</option>
+                    </select>
+                  </div>
+                  <div class="mb-3">
+                    <label for="groupName" class="form-label">Group</label>
+                    <select class="form-select" id="groupName" required>
+                      <option value="" selected disabled>Select a group...</option>
+                    </select>
+                  </div>
+                </form>
+                <div id="membershipError" class="alert alert-danger d-none" role="alert"></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveMembershipBtn">
+                  <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true" id="membershipSpinner"></span>
+                  Save Membership
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Add modal to DOM if not already there
+      if (!document.getElementById('addMembershipModal')) {
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+      }
+      
+      // Initialize modal
+      const modal = new bootstrap.Modal(document.getElementById('addMembershipModal'));
+      const userSelect = document.getElementById('userEmail');
+      const groupSelect = document.getElementById('groupName');
+      const errorDiv = document.getElementById('membershipError');
+      const saveBtn = document.getElementById('saveMembershipBtn');
+      const spinner = document.getElementById('membershipSpinner');
+      
+      // Clear form and error
+      document.getElementById('addMembershipForm')?.reset();
+      errorDiv.classList.add('d-none');
+      
+      // Show loading state
+      function setLoading(isLoading) {
+        if (isLoading) {
+          saveBtn.disabled = true;
+          spinner.classList.remove('d-none');
+        } else {
+          saveBtn.disabled = false;
+          spinner.classList.add('d-none');
+        }
+      }
+      
+      // Show error message
+      function showError(message) {
+        errorDiv.textContent = message;
+        errorDiv.classList.remove('d-none');
+      }
+      
+      // Load users into dropdown
+      function loadUsers() {
+        setLoading(true);
+        google.script.run
+          .withSuccessHandler(function(users) {
+            userSelect.innerHTML = '<option value="" selected disabled>Select a user...</option>';
+            users.forEach(user => {
+              const option = document.createElement('option');
+              option.value = user.email;
+              option.textContent = `${user.name} (${user.email})`;
+              userSelect.appendChild(option);
+            });
+            setLoading(false);
+          })
+          .withFailureHandler(function(error) {
+            console.error('Error loading users:', error);
+            showError('Failed to load users. Please try again.');
+            setLoading(false);
+          })
+          .getUsers();
+      }
+      
+      // Load groups into dropdown
+      function loadGroups() {
+        setLoading(true);
+        google.script.run
+          .withSuccessHandler(function(groups) {
+            groupSelect.innerHTML = '<option value="" selected disabled>Select a group...</option>';
+            groups.forEach(group => {
+              const option = document.createElement('option');
+              option.value = group.name;
+              option.textContent = group.name;
+              groupSelect.appendChild(option);
+            });
+            setLoading(false);
+          })
+          .withFailureHandler(function(error) {
+            console.error('Error loading groups:', error);
+            showError('Failed to load groups. Please try again.');
+            setLoading(false);
+          })
+          .getNotificationGroups();
+      }
+      
+      // Handle save button click
+      function handleSaveMembership() {
+        const userEmail = userSelect.value;
+        const groupName = groupSelect.value;
+        
+        if (!userEmail || !groupName) {
+          showError('Please select both a user and a group');
+          return;
+        }
+        
+        // Show loading state
+        setLoading(true);
+        errorDiv.classList.add('d-none');
+        
+        // Add membership
+        addMembership(userEmail, groupName);
+      }
+      
+      // Set up event listeners
+      saveBtn?.removeEventListener('click', handleSaveMembership);
+      saveBtn?.addEventListener('click', handleSaveMembership);
+      
+      // Load data and show modal
+      Promise.all([
+        new Promise(resolve => loadUsers()),
+        new Promise(resolve => loadGroups())
+      ]).then(() => {
+        modal.show();
+      });
+    }
+    
+    // Add membership
+    function addMembership(userEmail, groupName) {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addMembershipModal'));
+      const errorDiv = document.getElementById('membershipError');
+      const saveBtn = document.getElementById('saveMembershipBtn');
+      const spinner = document.getElementById('membershipSpinner');
+      
+      // Show loading state
+      saveBtn.disabled = true;
+      spinner.classList.remove('d-none');
+      errorDiv.classList.add('d-none');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          // Hide spinner and re-enable button
+          saveBtn.disabled = false;
+          spinner.classList.add('d-none');
+          
+          // Show success message
+          showToast('Membership added successfully!', 'success');
+          
+          // Close modal
+          if (modal) modal.hide();
+          
+          // Refresh memberships list
+          loadMemberships();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error adding membership:', error);
+          
+          // Hide spinner and re-enable button
+          saveBtn.disabled = false;
+          spinner.classList.add('d-none');
+          
+          // Show error in modal
+          if (errorDiv) {
+            errorDiv.textContent = 'Error adding membership: ' + (error.message || error);
+            errorDiv.classList.remove('d-none');
+            
+            // Scroll to error
+            errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            // Fallback to alert if modal is not available
+            alert('Error adding membership: ' + (error.message || error));
+          }
+        })
+        .addGroupMembership(userEmail, groupName);
+    }
+    
+    // Delete membership
+    function deleteMembership(userEmail, groupName) {
+      if (!confirm('Are you sure you want to remove this membership?')) return;
+      
+      showSpinner('Removing membership...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          hideSpinner();
+          alert('Membership removed successfully!');
+          loadMemberships();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error removing membership:', error);
+          hideSpinner();
+          alert('Error removing membership: ' + error);
+        })
+        .removeGroupMembership(userEmail, groupName);
+    }
+    
+    // Duplicate admin tab event listeners removed - handled in main initTabs function
+    
+    // Debug Leo webhook function
+    function debugLeoWebhookTest() {
+      console.log('Debugging Leo webhook...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Leo webhook debug result:', result);
+          alert(`Leo Webhook Debug Results:\n\n` +
+                `Leo Found: ${result.leoFound}\n` +
+                `Leo Email: ${result.leoEmail || 'Not found'}\n` +
+                `Has Webhook: ${result.hasWebhook}\n` +
+                `Total Users: ${result.totalUsers}\n\n` +
+                `Check console and logs for detailed information.`);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Leo webhook debug failed:', error);
+          alert('Leo webhook debug failed: ' + error.message);
+        })
+        .debugLeoWebhook();
+    }
+
+</script>

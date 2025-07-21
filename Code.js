@@ -164,6 +164,158 @@ function logAuditEvent(action) {
 }
 
 /**
+ * Shows the webhook test UI
+ * @returns {HtmlOutput} The HTML content for the webhook test UI
+ */
+// Expose test webhook functions to the client
+if (typeof module !== 'undefined') {
+  module.exports = {
+    testWebhookNotification: testWebhookNotification,
+    getUserWebhookDebugInfo: getUserWebhookDebugInfo
+  };
+}
+
+function showWebhookTestUI() {
+  return HtmlService.createHtmlOutputFromFile('WebhookTestUI')
+    .setWidth(600)
+    .setHeight(800)
+    .setTitle('Test Webhook Notifications');
+}
+
+/**
+ * Tests webhook notification for a user
+ * @param {string} email - The email of the user to test
+ * @param {string} message - Optional custom test message
+ * @returns {Object} Result of the test
+ */
+function testWebhookNotification(email, message = 'This is a test notification') {
+  try {
+    const user = getUserByEmail(email);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+    
+    const webhookUrl = user.webhookUrl || user.Chatwebhook;
+    if (!webhookUrl) {
+      return { success: false, error: 'No webhook URL configured for this user' };
+    }
+    
+    const testMessage = {
+      text: `🔔 *Test Notification*\n${message}\n\n_This is a test notification from ActionItems._`,
+      cards: [{
+        header: {
+          title: 'Test Notification',
+          subtitle: 'ActionItems System',
+          imageUrl: 'https://www.gstatic.com/images/branding/product/1x/chat_48dp.png'
+        },
+        sections: [{
+          widgets: [{
+            textParagraph: {
+              text: message
+            }
+          }]
+        }]
+      }]
+    };
+    
+    const response = sendWebhookNotification(webhookUrl, testMessage);
+    return {
+      success: true,
+      message: 'Test notification sent successfully',
+      response: response
+    };
+  } catch (error) {
+    console.error('Error testing webhook notification:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to send test notification'
+    };
+  }
+}
+
+/**
+ * Gets debug information about a user's webhook configuration
+ * @param {string} email - The email of the user to get debug info for
+ * @returns {Object} Debug information about the user's webhook configuration
+ */
+function getUserWebhookDebugInfo(email) {
+  try {
+    const user = getUserByEmail(email);
+    if (!user) {
+      return { 
+        success: false, 
+        error: 'User not found',
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    const webhookUrl = user.webhookUrl || user.Chatwebhook;
+    const hasWebhook = !!webhookUrl;
+    
+    // Check if webhook URL is a valid URL
+    let isValidUrl = false;
+    try {
+      if (webhookUrl) {
+        new URL(webhookUrl);
+        isValidUrl = true;
+      }
+    } catch (e) {
+      // URL is invalid
+      isValidUrl = false;
+    }
+    
+    // Check if user is in any notification groups
+    const notificationGroups = [];
+    const allGroups = getUsers().filter(u => u.isGroup);
+    allGroups.forEach(group => {
+      if (group.members && group.members.includes(email)) {
+        notificationGroups.push({
+          groupName: group.name || group.groupName || group.email,
+          groupId: group.groupId || group.email,
+          hasWebhook: !!(group.webhookUrl || group.Chatwebhook)
+        });
+      }
+    });
+    
+    return {
+      success: true,
+      user: {
+        email: user.email,
+        name: user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+        hasDirectWebhook: hasWebhook,
+        webhookUrl: hasWebhook ? webhookUrl : null,
+        webhookUrlValid: isValidUrl,
+        isActive: user.active !== false,
+        role: user.role || 'user',
+        lastUpdated: user.lastUpdated || 'Unknown',
+        notificationGroups: notificationGroups
+      },
+      systemInfo: {
+        timestamp: new Date().toISOString(),
+        totalUsers: getUsers().filter(u => !u.isGroup).length,
+        totalGroups: getUsers().filter(u => u.isGroup).length,
+        webhookEndpoint: 'https://chat.googleapis.com/v1/spaces/.../messages'
+      }
+    };
+  } catch (error) {
+    console.error('Error getting user webhook debug info:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get debug information',
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+
+// Make functions available to the client
+var clientFunctions = {
+  testWebhookNotification: testWebhookNotification,
+  getUserWebhookDebugInfo: getUserWebhookDebugInfo,
+  showWebhookTestUI: showWebhookTestUI,
+  testClientServerCommunication: testClientServerCommunication
+};
+
+/**
  * Gets the current user's email address
  * @returns {string} The user's email address
  */
@@ -498,7 +650,7 @@ function getActionItemOptionsLegacy() {
       // Build hierarchical structure
       if (!options.actionItems.categories[categoryLevel1]) {
         options.actionItems.categories[categoryLevel1] = {
-          displayName: categoryLevel1,
+          title: categoryLevel1,
           options: [],
           subcategories: {}
         };
@@ -507,7 +659,7 @@ function getActionItemOptionsLegacy() {
       if (categoryLevel2) {
         if (!options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2]) {
           options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2] = {
-            displayName: categoryLevel2,
+            title: categoryLevel2,
             options: [],
             subcategories: {}
           };
@@ -516,7 +668,7 @@ function getActionItemOptionsLegacy() {
         if (categoryLevel3) {
           if (!options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3]) {
             options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3] = {
-              displayName: categoryLevel3,
+              title: categoryLevel3,
               options: [],
               subcategories: {}
             };
@@ -525,7 +677,7 @@ function getActionItemOptionsLegacy() {
           if (categoryLevel4) {
             if (!options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3].subcategories[categoryLevel4]) {
               options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3].subcategories[categoryLevel4] = {
-                displayName: categoryLevel4,
+                title: categoryLevel4,
                 options: [],
                 subcategories: {}
               };
@@ -534,7 +686,7 @@ function getActionItemOptionsLegacy() {
             if (categoryLevel5) {
               if (!options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3].subcategories[categoryLevel4].subcategories[categoryLevel5]) {
                 options.actionItems.categories[categoryLevel1].subcategories[categoryLevel2].subcategories[categoryLevel3].subcategories[categoryLevel4].subcategories[categoryLevel5] = {
-                  displayName: categoryLevel5,
+                  title: categoryLevel5,
                   options: []
                 };
               }
@@ -643,87 +795,341 @@ function getCommentsForActionItem(itemId) {
     
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
-    
-    // Convert to array of objects
     const comments = [];
-    for (let i = 1; i < data.length; i++) {
-      const comment = {};
-      for (let j = 0; j < headers.length; j++) {
-        comment[headers[j]] = data[i][j];
-      }
-      
-      if (comment.actionItemId === itemId) {
-        comments.push(comment);
-      }
+    
+    // Find the index of the comment ID column
+    const commentIdIndex = headers.indexOf('commentId');
+    const actionItemIdIndex = headers.indexOf('actionItemId');
+    const authorIndex = headers.indexOf('author');
+    const contentIndex = headers.indexOf('content');
+    const timestampIndex = headers.indexOf('timestamp');
+    const mentionedUsersIndex = headers.indexOf('mentionedUsers');
+    
+    // If any required columns are missing, return empty array
+    if (commentIdIndex === -1 || actionItemIdIndex === -1 || authorIndex === -1 || 
+        contentIndex === -1 || timestampIndex === -1) {
+      console.error('Required columns not found in comments sheet');
+      return [];
     }
     
-    // Sort by timestamp
-    comments.sort((a, b) => {
-      const dateA = new Date(a.timestamp);
-      const dateB = new Date(b.timestamp);
-      return dateA - dateB;
-    });
+    // Filter comments for the specified action item
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row[actionItemIdIndex] === itemId) {
+        comments.push({
+          commentId: row[commentIdIndex],
+          actionItemId: row[actionItemIdIndex],
+          author: row[authorIndex],
+          content: row[contentIndex],
+          timestamp: row[timestampIndex],
+          mentionedUsers: mentionedUsersIndex !== -1 ? (row[mentionedUsersIndex] || '') : ''
+        });
+      }
+    }
     
     return comments;
   } catch (error) {
-    console.error('Error getting comments:', error);
-    throw error;
+    console.error('Error getting comments for action item:', error);
+    Logger.log('ERROR in getCommentsForActionItem: ' + error.toString());
+    return [];
   }
 }
 
 /**
- * Gets history for an action item
- * @param {string} itemId - Action item ID
- * @returns {Array} Array of history events
+ * Deletes a user or group
+ * @param {string} email - The email or group ID to delete
+ * @returns {Object} Result of the operation
  */
-function getActionItemHistory(itemId) {
+function deleteUser(email) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAMES.ACTION_ITEM_AUDIT);
+    if (!email) {
+      throw new Error('Email/Group ID is required');
+    }
+    
+    const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_NAMES.USERS);
     
     if (!sheet) {
-      throw new Error("Audit sheet not found");
+      throw new Error('Users sheet not found');
     }
     
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
+    // Get all data
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const headers = values[0];
     
-    // Convert to array of objects
-    const history = [];
-    for (let i = 1; i < data.length; i++) {
-      const event = {};
-      for (let j = 0; j < headers.length; j++) {
-        event[headers[j]] = data[i][j];
-      }
-      
-      if (event.actionItemId === itemId) {
-        history.push(event);
+    // Find email/groupId column
+    const emailCol = headers.indexOf('email');
+    const groupIdCol = headers.indexOf('groupId');
+    
+    if (emailCol === -1 && groupIdCol === -1) {
+      throw new Error('No identifier columns found in users sheet');
+    }
+    
+    // Find user/group row
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if ((emailCol !== -1 && values[i][emailCol] === email) || 
+          (groupIdCol !== -1 && values[i][groupIdCol] === email)) {
+        rowIndex = i;
+        break;
       }
     }
     
-    // Sort by timestamp
-    history.sort((a, b) => {
-      const dateA = new Date(a.changedAt);
-      const dateB = new Date(b.changedAt);
-      return dateB - dateA; // Newest first
-    });
+    if (rowIndex === -1) {
+      throw new Error('User/Group not found: ' + email);
+    }
     
-    return history;
+    // If this is a group, remove it from all members
+    if (values[rowIndex][headers.indexOf('isGroup')] === true) {
+      updateGroupMembers(email, []); // Remove all members
+    }
+    
+    // Delete the row
+    sheet.deleteRow(rowIndex + 1); // +1 because sheet rows are 1-based
+    
+    console.log('User/Group deleted successfully');
+    return { success: true, message: 'User/Group deleted successfully' };
+    
   } catch (error) {
-    console.error('Error getting history:', error);
+    console.error('Error deleting user/group:', error);
+    Logger.log('ERROR in deleteUser: ' + error.toString());
     throw error;
   }
 }
 
 /**
- * Gets users for mentions
- * @returns {Array} Array of users
+ * Saves a user or group
+ * @param {Object} user - User or group data to save
+ * @returns {Object} Result of the operation
+ */
+function saveUser(user) {
+  console.log('saveUser called with user:', JSON.stringify(user, null, 2));
+  
+  try {
+    const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
+    const userSheet = ss.getSheetByName(SHEET_NAMES.USERS);
+    
+    if (!userSheet) {
+      const errorMsg = "Users sheet not found";
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    const data = userSheet.getDataRange().getValues();
+    const headers = data[0];
+    let rowIndex = -1;
+    
+    console.log('Headers:', headers);
+    console.log('First data row:', data[1] ? data[1].join(', ') : 'No data rows');
+    
+    // Determine if this is a group
+    const isGroup = user.isGroup || false;
+    console.log('Is group:', isGroup);
+    const idField = isGroup ? 'groupId' : 'email';
+    const idValue = isGroup ? (user.email || user.groupId) : user.email;
+    
+    // Find existing user/group by email/groupId
+    const idIndex = headers.indexOf(isGroup ? 'groupId' : 'email');
+    if (idIndex !== -1) {
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][idIndex] === idValue) {
+          rowIndex = i + 1; // +1 because array is 0-based but sheet rows are 1-based
+          break;
+        }
+      }
+    }
+    
+    // Prepare user/group data in the correct order based on headers
+    const userData = [];
+    console.log('Preparing user data for save. Headers:', headers);
+    console.log('User data to save:', JSON.stringify(user, null, 2));
+    
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i];
+      
+      // Special handling for group fields
+      if (isGroup) {
+        if (header === 'groupId') userData.push(idValue);
+        else if (header === 'groupName') userData.push(user.name || '');
+        else if (header === 'members' && user.members) userData.push(Array.isArray(user.members) ? user.members.join(',') : user.members);
+        else if (header === 'webhookUrl' || header === 'chatwebhook') userData.push(user.webhookUrl || user.chatwebhook || '');
+        else if (header === 'role') userData.push('group');
+        else if (header === 'isGroup') userData.push(true);
+        else if (header === 'active') userData.push(user.active !== undefined ? user.active : true);
+        else if (header === 'email') userData.push(''); // Leave email empty for groups
+        else userData.push('');
+      } 
+      // Regular user fields
+      else {
+        // Generate displayName if not provided
+        const displayName = user.displayName || 
+                          (user.firstName && user.lastName ? `${user.firstName} ${user.lastName}`.trim() : 
+                          user.name || (user.email ? user.email.split('@')[0] : ''));
+        
+        if (header === 'email') {
+          const emailValue = user.email || '';
+          console.log(`Setting email header '${header}' to:`, emailValue);
+          userData.push(emailValue);
+        }
+        else if (header === 'firstName') userData.push(user.firstName || user.name?.split(' ')[0] || '');
+        else if (header === 'lastName') userData.push(user.lastName || user.name?.split(' ').slice(1).join(' ') || '');
+        else if (header === 'displayName') userData.push(displayName);
+        else if (header === 'role') userData.push((user.role || 'user').toLowerCase());
+        else if (header === 'webhookUrl' || header === 'chatwebhook') {
+          const webhookValue = user.webhookUrl || user.chatwebhook || '';
+          console.log(`Setting webhook for header '${header}' to:`, webhookValue);
+          userData.push(webhookValue);
+        }
+        else if (header === 'isGroup') userData.push(false);
+        else if (header === 'active') {
+          // Handle different active field names for backward compatibility
+          const activeValue = user.active !== undefined ? user.active : 
+                            (user.Isactive !== undefined ? user.Isactive : true);
+          userData.push(activeValue);
+        }
+        else if (header === 'groups') userData.push(Array.isArray(user.groups) ? user.groups.join(',') : user.groups || '');
+        // Handle legacy name field for backward compatibility
+        else if (header === 'name') userData.push(displayName);
+        else userData.push('');
+      }
+    }
+    
+    if (rowIndex > 0) {
+      // Update existing user/group
+      userSheet.getRange(rowIndex, 1, 1, userData.length).setValues([userData]);
+    } else {
+      // Add new user/group
+      userSheet.appendRow(userData);
+    }
+    
+    // If this is a group with members, update the members' group assignments
+    if (isGroup && user.members && user.members.length > 0) {
+      updateGroupMembers(idValue, user.members);
+    }
+    
+    return { 
+      success: true, 
+      message: isGroup ? "Group saved successfully" : "User saved successfully" 
+    };
+  } catch (error) {
+    console.error('Error saving user/group:', error);
+    throw error;
+  }
+}
+
+/**
+    console.log('Deleting user/group:', email);
+    
+    if (!email) {
+      throw new Error('Email/Group ID is required');
+    }
+    
+    const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_NAMES.USERS);
+    
+    if (!sheet) {
+      throw new Error('Users sheet not found');
+    }
+    
+    // Get all data
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const headers = values[0];
+    
+    // Find email/groupId column
+    const emailCol = headers.indexOf('email');
+    const groupIdCol = headers.indexOf('groupId');
+    
+    if (emailCol === -1 && groupIdCol === -1) {
+      throw new Error('No identifier columns found in users sheet');
+    }
+    
+    // Find user/group row
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if ((emailCol !== -1 && values[i][emailCol] === email) || 
+          (groupIdCol !== -1 && values[i][groupIdCol] === email)) {
+        rowIndex = i;
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) {
+      throw new Error('User/Group not found: ' + email);
+    }
+    
+    // If this is a group, remove it from all members
+    if (values[rowIndex][headers.indexOf('isGroup')] === true) {
+      updateGroupMembers(email, []); // Remove all members
+    }
+    
+    // Delete the row
+    sheet.deleteRow(rowIndex + 1); // +1 because sheet rows are 1-based
+    
+    console.log('User/Group deleted successfully');
+    return { success: true, message: 'User/Group deleted successfully' };
+    
+  } catch (error) {
+    console.error('Error deleting user/group:', error);
+    Logger.log('ERROR in deleteUser: ' + error.toString());
+    throw error;
+  }
+}
+
+/**
+ * Gets users and groups for the system
+ * @returns {Array} Array of users and groups
+ */
+/**
+ * Gets a single user by email
+ * @param {string} email - The email of the user to find
+ * @returns {Object} The user object or null if not found
+ */
+function getUserByEmail(email) {
+  try {
+    if (!email) {
+      throw new Error('Email is required');
+    }
+    
+    console.log('Searching for user with email:', email);
+    const users = getUsers();
+    console.log('Total users in system:', users.length);
+    
+    // Case-insensitive search
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = users.find(u => {
+      const userEmail = (u.email || '').toLowerCase().trim();
+      return userEmail === normalizedEmail;
+    });
+    
+    if (!user) {
+      console.log('User not found with email:', email);
+      console.log('Available emails:', users.map(u => u.email).filter(Boolean));
+      return null;
+    }
+    
+    // Ensure email is included in the returned user object
+    if (!user.email) {
+      user.email = email;
+    }
+    
+    console.log('Found user:', JSON.stringify(user, null, 2));
+    return {...user, email: user.email}; // Ensure email is in the returned object
+  } catch (error) {
+    console.error('Error in getUserByEmail:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets all users and groups from the system
+ * @returns {Array} Array of user and group objects
  */
 function getUsers() {
   try {
     const ss = SpreadsheetApp.openById(USER_SPREADSHEET_ID);
     const userSheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    const groupSheet = ss.getSheetByName(SHEET_NAMES.NOTIFICATION_GROUPS);
     
     if (!userSheet) {
       throw new Error("Users sheet not found");
@@ -740,35 +1146,259 @@ function getUsers() {
         user[userHeaders[j]] = userData[i][j];
       }
       
-      users.push({
-        name: user.name || user.email,
-        email: user.email,
-        isGroup: false
-      });
-    }
-    
-    // Add groups if available
-    if (groupSheet) {
-      const groupData = groupSheet.getDataRange().getValues();
-      const groupHeaders = groupData[0];
+      // Check if this is a group (has groupId and groupName)
+      const isGroup = !!(user.groupId && user.groupName);
+      const email = isGroup ? user.groupId : user.email;
+      const name = isGroup ? user.groupName : (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email);
       
-      for (let i = 1; i < groupData.length; i++) {
-        const group = {};
-        for (let j = 0; j < groupHeaders.length; j++) {
-          group[groupHeaders[j]] = groupData[i][j];
-        }
-        
-        users.push({
-          name: group.groupName,
-          email: group.groupId,
-          isGroup: true
-        });
-      }
+      users.push({
+        name: name,
+        email: email,
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        displayName: user.displayName || name,
+        role: user.role || (isGroup ? 'group' : 'user'),
+        active: user.active || user.Isactive || true,
+        webhookUrl: user.Chatwebhook || user.webhookUrl || '',
+        isGroup: isGroup,
+        // For groups, store member emails in the members array
+        members: user.members ? user.members.split(',').map(m => m.trim()) : []
+      });
     }
     
     return users;
   } catch (error) {
     console.error('Error getting users:', error);
     throw error;
+  }
+}
+
+/**
+ * Gets users as a map for webhook lookups with normalized email keys
+ * @returns {Object} Map of lowercase email -> user object
+ */
+function getUserMap() {
+  const startTime = new Date();
+  const sessionId = Utilities.getUuid().substring(0, 8);
+  
+  try {
+    console.log(`=== GET USER MAP START [${sessionId}] ===`);
+    console.log(`[${sessionId}] Loading users...`);
+    
+    const users = getUsers();
+    const userMap = {};
+    let validWebhookCount = 0;
+    let userCount = 0;
+    
+    console.log(`[${sessionId}] Loaded ${Array.isArray(users) ? users.length : 'unknown'} users`);
+    
+    if (!Array.isArray(users)) {
+      console.error('getUsers() did not return an array:', users);
+      throw new Error('Failed to load users: Invalid data format');
+    }
+    
+    console.log(`Processing ${users.length} users from getUsers()`);
+    
+    users.forEach((user, index) => {
+      userCount++;
+      try {
+        if (!user || !user.email) {
+          console.warn(`[${sessionId}] Skipping user at index ${index}: Missing email`);
+          return;
+        }
+        
+        const email = user.email.toLowerCase().trim();
+        
+        // Log if this is the user we're looking for
+        if (email === 'clinicalinnovation@rezilienthealth.com') {
+          console.log(`[${sessionId}] FOUND CLINICALINNOVATION USER:`, JSON.stringify(user, null, 2));
+        }
+        
+        // Only include users with a webhook URL
+        if (user.webhookUrl && typeof user.webhookUrl === 'string' && user.webhookUrl.trim()) {
+          const webhookUrl = user.webhookUrl.trim();
+          const isValidUrl = webhookUrl.startsWith('http');
+          
+          userMap[email] = {
+            ...user,
+            email: email,
+            webhookUrl: isValidUrl ? webhookUrl : '',
+            hasValidWebhook: isValidUrl,
+            _debug: {
+              processedAt: new Date().toISOString(),
+              source: 'getUserMap',
+              sessionId: sessionId
+            }
+          };
+          
+          if (isValidUrl) {
+            validWebhookCount++;
+            if (email === 'clinicalinnovation@rezilienthealth.com') {
+              console.log(`[${sessionId}] CLINICALINNOVATION WEBHOOK CONFIGURED:`, webhookUrl);
+            }
+          } else if (email === 'clinicalinnovation@rezilienthealth.com') {
+            console.warn(`[${sessionId}] CLINICALINNOVATION HAS INVALID WEBHOOK:`, webhookUrl);
+          }
+        }
+        
+        // Create user object with normalized data
+        userMap[email] = {
+          ...user,
+          email: email,
+          webhookUrl: webhookUrl
+        };
+        
+        console.log(`Added user: ${email}${webhookUrl ? ' (webhook available)' : ''}`);
+      } catch (userError) {
+        console.error(`Error processing user at index ${index}:`, userError);
+      }
+    });
+    
+    const endTime = new Date();
+    const durationMs = endTime - startTime;
+    
+    console.log(`=== GET USER MAP COMPLETE [${sessionId}] ===`);
+    console.log(`[${sessionId}] Processed ${userCount} users in ${durationMs}ms`);
+    console.log(`[${sessionId}] - Users with valid webhooks: ${validWebhookCount}/${Object.keys(userMap).length}`);
+    
+    // Log clinicalinnovation user status
+    const clinicalUser = userMap['clinicalinnovation@rezilienthealth.com'];
+    if (clinicalUser) {
+      console.log(`[${sessionId}] CLINICALINNOVATION USER FOUND:`, {
+        email: clinicalUser.email,
+        hasWebhook: !!clinicalUser.webhookUrl,
+        webhookUrl: clinicalUser.webhookUrl ? '***URL_REDACTED***' : 'MISSING',
+        hasValidWebhook: clinicalUser.hasValidWebhook || false
+      });
+    } else {
+      console.warn(`[${sessionId}] CLINICALINNOVATION USER NOT FOUND IN USER MAP`);
+    }
+    
+    return userMap;
+  } catch (error) {
+    const errorMsg = `[${sessionId}] CRITICAL ERROR in getUserMap: ${error.toString()}\n${error.stack || 'No stack trace'}`;
+    console.error(errorMsg);
+    Logger.log(errorMsg);
+    
+    // Return empty map instead of throwing to prevent cascading failures
+    return {};
+  }
+}
+
+// =================================================================================
+// NOTIFICATION FUNCTIONS
+// =================================================================================
+
+/**
+ * Extracts mentioned users from text content
+ * @param {string} text - The text content to search for mentions
+ * @returns {Array} Array of mentioned user emails
+ */
+function extractMentionedUsers(text) {
+  if (!text) return [];
+  
+  // Match email addresses in the format @user@example.com
+  const mentionRegex = /@([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/g;
+  const matches = [];
+  let match;
+  
+  while ((match = mentionRegex.exec(text)) !== null) {
+    // Remove the @ symbol and add to matches
+    matches.push(match[1]);
+  }
+  
+  return [...new Set(matches)]; // Remove duplicates
+}
+
+/**
+ * Sends a notification to mentioned users
+ * @param {string} content - The content containing mentions
+ * @param {string} contextUrl - URL to the relevant item
+ * @param {string} author - Email of the user who made the mention
+ * @param {string} itemTitle - Title of the item being mentioned in
+ */
+function notifyMentionedUsers(content, contextUrl, author, itemTitle) {
+  try {
+    const mentionedEmails = extractMentionedUsers(content);
+    if (mentionedEmails.length === 0) return;
+    
+    const userMap = getUserMap();
+    const authorUser = userMap[author] || { name: author, email: author };
+    
+    mentionedEmails.forEach(email => {
+      const user = userMap[email];
+      if (!user || !user.webhookUrl) return;
+      
+      const message = {
+        text: `You were mentioned by ${authorUser.name} in "${itemTitle}"`,
+        cards: [{
+          header: {
+            title: `New mention in ${itemTitle}`,
+            subtitle: `From: ${authorUser.name}`
+          },
+          sections: [{
+            widgets: [{
+              textParagraph: {
+                text: content.length > 200 ? content.substring(0, 200) + '...' : content
+              }
+            }, {
+              buttons: [{
+                text: 'View',
+                onClick: {
+                  openLink: {
+                    url: contextUrl
+                  }
+                }
+              }]
+            }]
+          }]
+        }]
+      };
+      
+      sendWebhookNotification(user.webhookUrl, message);
+    });
+  } catch (error) {
+    console.error('Error notifying mentioned users:', error);
+    Logger.log('ERROR in notifyMentionedUsers: ' + error.toString());
+  }
+}
+
+/**
+ * Sends a webhook notification to the specified URL
+ * @param {string} webhookUrl - The webhook URL to send the notification to
+ * @param {Object} message - The message payload to send
+ * @returns {Object} Response from the webhook
+ */
+function sendWebhookNotification(webhookUrl, message) {
+  if (!webhookUrl) {
+    console.error('No webhook URL provided');
+    return null;
+  }
+  
+  try {
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(message),
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(webhookUrl, options);
+    const responseCode = response.getResponseCode();
+    
+    if (responseCode < 200 || responseCode >= 300) {
+      console.error(`Webhook notification failed with status ${responseCode}: ${response.getContentText()}`);
+    } else {
+      console.log(`Webhook notification sent successfully to ${webhookUrl}`);
+    }
+    
+    return {
+      status: responseCode,
+      content: response.getContentText()
+    };
+  } catch (error) {
+    console.error('Error sending webhook notification:', error);
+    Logger.log('ERROR in sendWebhookNotification: ' + error.toString());
+    return { error: error.toString() };
   }
 }

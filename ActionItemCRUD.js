@@ -171,10 +171,6 @@ function getActionItemById(actionItemId) {
 function saveActionItem(actionItemData) {
   try {
     // Validate required fields
-    if (!actionItemData.actionItemType) {
-      throw new Error('Action item type is required');
-    }
-    
     if (!actionItemData.title) {
       throw new Error('Title is required');
     }
@@ -226,6 +222,15 @@ function saveActionItem(actionItemData) {
     if (isNew) {
       actionItemData.createdBy = userEmail;
       actionItemData.createdAt = now;
+    } else {
+      // For existing items, preserve the original createdBy and createdAt from the spreadsheet
+      const originalRow = values[rowIndex];
+      if (!actionItemData.createdBy && originalRow[columnMap.createdBy]) {
+        actionItemData.createdBy = originalRow[columnMap.createdBy];
+      }
+      if (!actionItemData.createdAt && originalRow[columnMap.createdAt]) {
+        actionItemData.createdAt = originalRow[columnMap.createdAt];
+      }
     }
     
     actionItemData.lastUpdated = now;
@@ -314,6 +319,88 @@ function saveActionItem(actionItemData) {
     Logger.log('ERROR in saveActionItem: ' + error.toString());
     throw error;
   }
+}
+
+/**
+ * Processes mentions in an action item and sends notifications
+ * @param {Object} actionItem - The action item data
+ * @param {boolean} isNew - Whether this is a new action item
+ */
+function processActionItemMentions(actionItem, isNew) {
+  try {
+    if (!actionItem) return;
+    
+    // Get the current user's email for the author
+    const author = Session.getActiveUser().getEmail();
+    
+    // Check for mentions in the description
+    if (actionItem.description) {
+      notifyMentionedUsers(
+        actionItem.description, 
+        getActionItemUrl(actionItem.actionItemId),
+        author,
+        actionItem.title || 'Untitled Action Item'
+      );
+    }
+    
+    // Check for mentions in the mentionedUsers field
+    if (actionItem.mentionedUsers) {
+      // Convert string to array if needed
+      const mentionedUsers = Array.isArray(actionItem.mentionedUsers) 
+        ? actionItem.mentionedUsers 
+        : actionItem.mentionedUsers.split(',').map(u => u.trim());
+      
+      // Only process if there are actually mentioned users
+      if (mentionedUsers.length > 0) {
+        notifyMentionedUsers(
+          mentionedUsers.join(', '), // Convert array back to string for processing
+          getActionItemUrl(actionItem.actionItemId),
+          author,
+          actionItem.title || 'Untitled Action Item',
+          true // Explicit mention
+        );
+      }
+    }
+    
+    // For new action items, also check for mentions in comments if any
+    if (isNew && actionItem.comments) {
+      // If comments is a string, try to parse it as JSON
+      let comments = [];
+      try {
+        comments = typeof actionItem.comments === 'string' 
+          ? JSON.parse(actionItem.comments) 
+          : actionItem.comments;
+      } catch (e) {
+        Logger.log('Error parsing comments: ' + e.toString());
+      }
+      
+      // Process each comment for mentions
+      comments.forEach(comment => {
+        if (comment.content) {
+          notifyMentionedUsers(
+            comment.content,
+            getActionItemUrl(actionItem.actionItemId) + "#comment-" + (comment.id || ''),
+            comment.author || author,
+            'Comment on: ' + (actionItem.title || 'Untitled Action Item')
+          );
+        }
+      });
+    }
+  } catch (error) {
+    // Log the error but don't fail the save operation
+    console.error('Error processing mentions:', error);
+    Logger.log('ERROR in processActionItemMentions: ' + error.toString());
+  }
+}
+
+/**
+ * Gets the URL for an action item
+ * @param {string} actionItemId - The action item ID
+ * @returns {string} The URL to view the action item
+ */
+function getActionItemUrl(actionItemId) {
+  const scriptUrl = ScriptApp.getService().getUrl();
+  return scriptUrl + '?actionItemId=' + encodeURIComponent(actionItemId);
 }
 
 /**
@@ -424,6 +511,54 @@ function logActionItemAudit(actionItemId, fieldChanged, oldValue, newValue) {
     ]);
   } catch (error) {
     Logger.log('ERROR in logActionItemAudit: ' + error.toString());
+  }
+}
+
+/**
+ * Completes an action item (wrapper for updateActionItemStatus)
+ * @param {string} actionItemId - The ID of the action item to complete
+ * @returns {Object} The updated action item
+ */
+function completeActionItem(actionItemId) {
+  return updateActionItemStatus(actionItemId, 'Completed');
+}
+
+/**
+ * Assigns an action item to a user
+ * @param {string} actionItemId - The ID of the action item
+ * @param {string} assigneeEmail - The email of the user to assign to
+ * @returns {Object} The updated action item
+ */
+function assignActionItem(actionItemId, assigneeEmail) {
+  try {
+    // Get the current item
+    const item = getActionItemById(actionItemId);
+    
+    if (!item) {
+      throw new Error('Action item not found');
+    }
+    
+    // Update the assignment
+    const oldAssignee = item.assignedTo;
+    item.assignedTo = assigneeEmail;
+    item.lastUpdated = new Date();
+    item.lastUpdatedBy = getUserEmail();
+    
+    // Save the updated item
+    const updatedItem = saveActionItem(item);
+    
+    // Log assignment change to audit trail
+    logActionItemAudit(
+      actionItemId,
+      'assignedTo',
+      oldAssignee || '',
+      assigneeEmail
+    );
+    
+    return updatedItem;
+  } catch (error) {
+    Logger.log('ERROR in assignActionItem: ' + error.toString());
+    throw error;
   }
 }
 
