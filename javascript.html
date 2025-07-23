@@ -1,3 +1,64 @@
+<style>
+  /* Custom Confirm Modal Styles */
+  .custom-confirm-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .custom-confirm-modal .modal-content {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  }
+  .custom-confirm-modal h3 {
+    margin-top: 0;
+    color: #333;
+    margin-bottom: 15px;
+  }
+  .custom-confirm-modal p {
+    margin: 0 0 20px 0;
+    color: #555;
+  }
+  .custom-confirm-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .custom-confirm-modal .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+  }
+  .custom-confirm-modal .btn-secondary {
+    background: #6c757d;
+    color: white;
+  }
+  .custom-confirm-modal .btn-secondary:hover {
+    background: #5a6268;
+  }
+  .custom-confirm-modal .btn-danger {
+    background: #dc3545;
+    color: white;
+  }
+  .custom-confirm-modal .btn-danger:hover {
+    background: #c82333;
+  }
+</style>
+
 <script>
     // Global variables
     let actionItems = [];
@@ -184,6 +245,10 @@
       safeAddEventListener('new-item-btn', 'click', openNewItemModal);
       safeAddEventListener('new-item-btn-all', 'click', openNewItemModal);
       safeAddEventListener('new-template-btn', 'click', openNewTemplateModal);
+      
+      // Refresh buttons
+      safeAddEventListener('refresh-btn', 'click', handleRefreshClick);
+      safeAddEventListener('refresh-btn-all', 'click', handleRefreshClick);
       
       // Add debug button for viewing logs
       const debugButton = document.createElement('button');
@@ -389,8 +454,154 @@
       console.log('Populated category filters with', categories.size, 'Level 1 categories:', Array.from(categories));
     }
     
+    // Update assignment filters based on current action items
+    function updateAssignmentFilters() {
+      try {
+        const assignedToSet = new Set();
+        
+        // Collect all unique assignees
+        actionItems.forEach(item => {
+          if (item.assignedTo) {
+            assignedToSet.add(item.assignedTo);
+          }
+        });
+        
+        // Update the assignment filter dropdown
+        const assignFilter = document.getElementById('assign-filter');
+        if (assignFilter) {
+          // Store current selection
+          const currentValue = assignFilter.value;
+          
+          // Clear existing options except the first one (All)
+          while (assignFilter.options.length > 1) {
+            assignFilter.remove(1);
+          }
+          
+          // Add each assignee as an option
+          const assignees = Array.from(assignedToSet).sort();
+          assignees.forEach(assignee => {
+            const option = document.createElement('option');
+            option.value = assignee;
+            option.textContent = formatEmailForDisplay(assignee);
+            assignFilter.appendChild(option);
+          });
+          
+          // Restore selection if it still exists
+          if (currentValue && assignees.includes(currentValue)) {
+            assignFilter.value = currentValue;
+          }
+        }
+      } catch (e) {
+        console.error('Error updating assignment filters:', e);
+      }
+    }
+    
+    // Update created by filters based on current action items
+    function updateCreatedByFilters() {
+      try {
+        const createdBySet = new Set();
+        
+        // Collect all unique creators
+        actionItems.forEach(item => {
+          if (item.createdBy) {
+            createdBySet.add(item.createdBy);
+          }
+        });
+        
+        // Update the created by filter dropdown
+        const createdByFilter = document.getElementById('created-by-filter');
+        if (createdByFilter) {
+          // Store current selection
+          const currentValue = createdByFilter.value;
+          
+          // Clear existing options except the first one (All)
+          while (createdByFilter.options.length > 1) {
+            createdByFilter.remove(1);
+          }
+          
+          // Add each creator as an option
+          const creators = Array.from(createdBySet).sort();
+          creators.forEach(creator => {
+            const option = document.createElement('option');
+            option.value = creator;
+            option.textContent = formatEmailForDisplay(creator);
+            createdByFilter.appendChild(option);
+          });
+          
+          // Restore selection if it still exists
+          if (currentValue && creators.includes(currentValue)) {
+            createdByFilter.value = currentValue;
+          }
+        }
+      } catch (e) {
+        console.error('Error updating created by filters:', e);
+      }
+    }
+    
+    // Update category filters based on current action items
+    function updateCategoryFilters() {
+      try {
+        const categorySet = new Set();
+        
+        // Collect all unique categories
+        actionItems.forEach(item => {
+          if (item.category) {
+            // Handle both string and array categories
+            if (Array.isArray(item.category)) {
+              item.category.forEach(cat => categorySet.add(cat));
+            } else {
+              categorySet.add(item.category);
+            }
+          }
+        });
+        
+        // Update the category filter dropdown
+        const categoryFilter = document.getElementById('category-filter');
+        if (categoryFilter) {
+          // Store current selection
+          const currentValue = categoryFilter.value;
+          
+          // Clear existing options except the first one (All)
+          while (categoryFilter.options.length > 1) {
+            categoryFilter.remove(1);
+          }
+          
+          // Add each category as an option
+          const categories = Array.from(categorySet).sort();
+          categories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            categoryFilter.appendChild(option);
+          });
+          
+          // Restore selection if it still exists
+          if (currentValue && categories.includes(currentValue)) {
+            categoryFilter.value = currentValue;
+          }
+        }
+      } catch (e) {
+        console.error('Error updating category filters:', e);
+      }
+    }
+    
+    // Check and show admin tab if user is admin
+    function checkAndShowAdminTab() {
+      try {
+        // This function would typically check if the current user has admin privileges
+        // and show/hide the admin tab accordingly
+        const adminTab = document.querySelector('.tab[data-tab="admin"]');
+        if (adminTab) {
+          // For now, we'll just show it - in a real app, you'd check permissions
+          adminTab.style.display = 'inline-block';
+        }
+      } catch (e) {
+        console.error('Error checking admin status:', e);
+      }
+    }
+    
     // Load action items
-    function loadActionItems() {
+    function loadActionItems(forceRefresh = false) {
       console.log('loadActionItems: Starting to load action items...');
       showSpinner('Loading action items...');
       
@@ -401,41 +612,49 @@
             console.log('loadActionItems: Successfully received items from server');
             console.log('ITEMS RECEIVED FROM SERVER:', items);
             console.log('ITEMS TYPE:', typeof items);
-            console.log('ITEMS COUNT:', items ? items.length : 0);
+            console.log('ITEMS COUNT:', items ? (Array.isArray(items) ? items.length : 'Not an array') : 'No items');
             
-            if (!items) {
-              console.error('loadActionItems: Received null or undefined items from server');
+            try {
+              // Process items if we got them
+              if (items && Array.isArray(items)) {
+                console.log('loadActionItems: Processing', items.length, 'items');
+                
+                // If forcing refresh, completely replace the actionItems array
+                if (forceRefresh) {
+                  actionItems = [];
+                  // Force a re-render by updating the DOM directly
+                  const container = document.getElementById('action-items-container');
+                  if (container) container.innerHTML = '';
+                }
+                
+                // Update the actionItems array with fresh data
+                actionItems = items;
+                
+                // Update filters
+                updateAssignmentFilters();
+                updateCreatedByFilters();
+                updateCategoryFilters();
+                
+                // Force a complete re-render of all items
+                console.log('loadActionItems: Forcing complete re-render of action items');
+                renderActionItems();
+                
+                // Check if we need to show the admin tab
+                checkAndShowAdminTab();
+              } else {
+                console.warn('loadActionItems: Received invalid items format:', items);
+                actionItems = [];
+                renderActionItems();
+              }
+            } catch (e) {
+              console.error('Error processing items:', e);
+              console.error('Stack:', e.stack);
               actionItems = [];
               renderActionItems();
+              throw e; // Re-throw to be caught by the failure handler
+            } finally {
               hideSpinner();
-              return;
             }
-            
-            if (!Array.isArray(items)) {
-              console.error('loadActionItems: Items is not an array:', items);
-              items = [];
-            }
-            
-            // Debug: Log each item's key fields
-            if (items.length > 0) {
-              console.log('loadActionItems: Processing', items.length, 'items');
-              items.forEach((item, index) => {
-                console.log(`Item ${index}:`, {
-                  id: item.actionItemId,
-                  title: item.title,
-                  priority: item.priority,
-                  status: item.status,
-                  assignedTo: item.assignedTo,
-                  categoryPath: item.categoryPath
-                });
-              });
-            } else {
-              console.log('loadActionItems: No items returned from server');
-            }
-            
-            console.log('loadActionItems: Updating actionItems and rendering...');
-            actionItems = items || [];
-            
             try {
               console.log('loadActionItems: Populating filters...');
               populateAssignmentFilter();
@@ -909,43 +1128,75 @@
       // Create compact action item details section for comments modal
       const detailsHtml = `
         <div class="action-item-details compact-details">
-          <div class="details-grid">
-            <div class="detail-item">
-              <span class="detail-label">Title:</span>
-              <span class="detail-value">${item.title || 'Untitled'}</span>
-            </div>
+          <!-- Title and Description Group -->
+          <div class="detail-group">
+            <h3 class="item-title">${item.title || 'Untitled Action Item'}</h3>
             ${item.description ? `
-            <div class="detail-item">
-              <span class="detail-label">Desc:</span>
-              <span class="detail-value">${item.description}</span>
-            </div>` : ''}
-            <div class="detail-item">
-              <span class="detail-label">Assigned:</span>
-              <span class="detail-value">${item.assignedTo || 'Unassigned'}</span>
+              <div class="description">${item.description}</div>
+            ` : ''}
+          </div>
+          
+          <!-- Status and Assignment Group -->
+          <div class="detail-group">
+            <div class="detail-group-header">
+              <div class="detail-group-title">Status & Assignment</div>
+              <span class="status-badge ${getStatusClass(item.status)}">${item.status || 'Open'}</span>
             </div>
+            
             <div class="detail-item">
-              <span class="detail-label">Due:</span>
-              <span class="detail-value">${item.dueDate ? formatDate(item.dueDate) : 'Not set'}</span>
+              <span class="detail-label">Assigned To</span>
+              <div class="detail-value">
+                ${item.assignedTo ? `
+                  <div class="assignee-display">
+                    <span class="assignee-avatar">${getInitials(item.assignedTo)}</span>
+                    <span>${formatEmailForDisplay(item.assignedTo)}</span>
+                  </div>
+                ` : 'Unassigned'}
+              </div>
             </div>
+            
+            <div class="action-buttons">
+              <button class="action-btn secondary" id="assign-btn-${item.actionItemId}" 
+                data-item-id="${item.actionItemId}" 
+                onclick="event.stopPropagation(); selfAssignFromComments('${item.actionItemId}', event);">
+                ${item.assignedTo === getCurrentUserEmail() ? 'Reassign' : 'Assign'}
+              </button>
+              ${item.status !== 'Completed' ? `
+                <button class="action-btn success" onclick="event.stopPropagation(); completeFromComments('${item.actionItemId}');">
+                  Mark Complete
+                </button>
+              ` : ''}
+            </div>
+          </div>
+          
+          <!-- Details Group -->
+          <div class="detail-group">
+            <div class="detail-group-title">Details</div>
+            
             <div class="detail-item">
-              <span class="detail-label">Priority:</span>
+              <span class="detail-label">Priority</span>
               <span class="detail-value">${item.priority || 'Not set'}</span>
             </div>
+            
             <div class="detail-item">
-              <span class="detail-label">Status:</span>
-              <span class="detail-value">${item.status || 'Open'}</span>
+              <span class="detail-label">Due Date</span>
+              <span class="detail-value">${item.dueDate ? formatDate(item.dueDate) : 'Not set'}</span>
             </div>
+            
             <div class="detail-item">
-              <span class="detail-label">Category:</span>
+              <span class="detail-label">Category</span>
               <span class="detail-value">${item.categoryPath || 'No category'}</span>
             </div>
+            
             ${item.mentionedUsers ? `
+              <div class="detail-item">
+                <span class="detail-label">Mentions</span>
+                <span class="detail-value">${Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers}</span>
+              </div>
+            ` : ''}
+            
             <div class="detail-item">
-              <span class="detail-label">Mentions:</span>
-              <span class="detail-value">${Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers}</span>
-            </div>` : ''}
-            <div class="detail-item">
-              <span class="detail-label">Created:</span>
+              <span class="detail-label">Created</span>
               <span class="detail-value">${item.createdBy || 'System'} • ${item.createdAt ? formatDate(item.createdAt) : 'Unknown'}</span>
             </div>
           </div>
@@ -1068,6 +1319,421 @@
       return 'just now';
     }
     
+    // Show assign dropdown with user list
+    function showAssignDropdown(itemId, event) {
+      console.log('showAssignDropdown called with itemId:', itemId);
+      console.log('Event target:', event && event.target);
+      
+      // Check if dropdown already exists and remove it
+      const existingDropdown = document.getElementById('assign-dropdown');
+      if (existingDropdown) {
+        console.log('Removing existing dropdown');
+        existingDropdown.remove();
+        return;
+      }
+      
+      // Get the current item and user info
+      const currentUser = getCurrentUserEmail();
+      console.log('Current user:', currentUser);
+      
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      if (!item) {
+        console.error('Item not found:', itemId);
+        return;
+      }
+      
+      console.log('Available users count:', availableUsers && availableUsers.length);
+      console.log('Available users:', availableUsers);
+      
+      if (!availableUsers || availableUsers.length === 0) {
+        console.error('No available users found. availableUsers is:', availableUsers);
+        return;
+      }
+      
+      // Create dropdown container with more visible styling
+      const dropdown = document.createElement('div');
+      dropdown.id = 'assign-dropdown';
+      dropdown.style.position = 'absolute';
+      dropdown.style.backgroundColor = 'white';
+      dropdown.style.border = '1px solid #ddd';
+      dropdown.style.borderRadius = '4px';
+      dropdown.style.padding = '8px';
+      dropdown.style.zIndex = '9999'; // Very high z-index
+      dropdown.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+      dropdown.style.minWidth = '200px';
+      dropdown.style.maxHeight = '300px';
+      dropdown.style.overflowY = 'auto';
+      dropdown.style.display = 'block';
+      
+      // Add a title
+      const title = document.createElement('div');
+      title.textContent = 'Assign To:';
+      title.style.fontWeight = 'bold';
+      title.style.padding = '8px';
+      title.style.borderBottom = '1px solid #eee';
+      title.style.color = '#333';
+      dropdown.appendChild(title);
+      
+      // Add self-assign option with better label
+      const selfAssign = document.createElement('div');
+      selfAssign.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span>Me (${currentUser.split('@')[0]})</span>
+          <span style="font-size: 12px; color: #666;">${item.assignedTo === currentUser ? '✓' : ''}</span>
+        </div>
+      `;
+      selfAssign.style.padding = '10px 12px';
+      selfAssign.style.cursor = 'pointer';
+      selfAssign.style.borderRadius = '4px';
+      selfAssign.style.transition = 'background-color 0.2s';
+      
+      if (item.assignedTo === currentUser) {
+        selfAssign.style.backgroundColor = '#e6f7ff';
+        selfAssign.style.fontWeight = '500';
+      }
+      
+      selfAssign.addEventListener('mouseover', () => {
+        if (item.assignedTo !== currentUser) {
+          selfAssign.style.backgroundColor = '#f5f5f5';
+        }
+      });
+      
+      selfAssign.addEventListener('mouseout', () => {
+        if (item.assignedTo !== currentUser) {
+          selfAssign.style.backgroundColor = 'transparent';
+        } else {
+          selfAssign.style.backgroundColor = '#e6f7ff';
+        }
+      });
+      
+      selfAssign.addEventListener('click', (e) => {
+        e.stopPropagation();
+        assignActionItem(itemId, currentUser);
+      });
+      
+      dropdown.appendChild(selfAssign);
+      
+      // Add other users
+      const otherUsers = availableUsers.filter(user => user.email !== currentUser);
+      if (otherUsers.length > 0) {
+        const divider = document.createElement('div');
+        divider.style.height = '1px';
+        divider.style.backgroundColor = '#eee';
+        divider.style.margin = '4px 0';
+        dropdown.appendChild(divider);
+        
+        otherUsers.forEach(user => {
+          const userEl = document.createElement('div');
+          userEl.textContent = user.name || user.email;
+          userEl.style.padding = '8px';
+          userEl.style.cursor = 'pointer';
+          userEl.style.borderRadius = '4px';
+          
+          if (item.assignedTo === user.email) {
+            userEl.style.backgroundColor = '#e6f7ff';
+            userEl.style.fontWeight = 'bold';
+          }
+          
+          userEl.addEventListener('mouseover', () => {
+            if (item.assignedTo !== user.email) {
+              userEl.style.backgroundColor = '#f5f5f5';
+            }
+          });
+          
+          userEl.addEventListener('mouseout', () => {
+            if (item.assignedTo !== user.email) {
+              userEl.style.backgroundColor = 'transparent';
+            } else {
+              userEl.style.backgroundColor = '#e6f7ff';
+            }
+          });
+          
+          userEl.addEventListener('click', () => {
+            assignActionItem(itemId, user.email);
+          });
+          
+          dropdown.appendChild(userEl);
+        });
+      }
+      
+      // Position the dropdown
+      const button = event ? event.target : document.querySelector(`#assign-btn-${itemId}`);
+      if (button) {
+        const rect = button.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.top = `${rect.bottom}px`;
+        document.body.appendChild(dropdown);
+        
+        // Close when clicking outside
+        const closeDropdown = (e) => {
+          if (!dropdown.contains(e.target) && e.target !== button) {
+            dropdown.remove();
+            document.removeEventListener('click', closeDropdown);
+          }
+        };
+        
+        // Use setTimeout to avoid immediate closing
+        setTimeout(() => {
+          document.addEventListener('click', closeDropdown);
+        }, 100);
+      } else {
+        console.error('Could not find button to position dropdown');
+      }
+    }
+    
+    // Assign action item to a user
+    function assignActionItem(itemId, assigneeEmail) {
+      // Set the flag to prevent UI refresh during assignment
+      window.isPerformingTaskAction = true;
+      assignmentChanged = true; // Mark that an assignment was changed
+      
+      const currentUser = getCurrentUserEmail();
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      
+      if (!item) {
+        alert('Action item not found');
+        window.isPerformingTaskAction = false;
+        return;
+      }
+      
+      const wasAssigned = !!item.assignedTo;
+      const isReassigning = wasAssigned && item.assignedTo !== assigneeEmail;
+      const isUnassigning = wasAssigned && assigneeEmail === '';
+      
+      // Determine if we should update the status to 'In Progress'
+      const shouldUpdateStatus = assigneeEmail && 
+                              item.status !== 'In Progress' && 
+                              item.status !== 'Completed' &&
+                              item.status !== 'Updating';
+      
+      let commentText = '';
+      
+      if (isUnassigning) {
+        commentText = `Unassigned from ${item.assignedTo}`;
+      } else if (isReassigning) {
+        commentText = `Reassigned from ${item.assignedTo} to ${assigneeEmail}`;
+      } else if (assigneeEmail === currentUser) {
+        commentText = `Assigned to me${wasAssigned ? ` (was ${item.assignedTo})` : ''}`;
+      } else {
+        commentText = `Assigned to ${assigneeEmail}${wasAssigned ? ` (was ${item.assignedTo})` : ''}`;
+      }
+      
+      // Add status update to comment if needed
+      if (shouldUpdateStatus) {
+        commentText += `\n\nStatus automatically updated to 'In Progress'`;
+      }
+      
+      // Show loading state
+      const assignBtn = document.querySelector(`#assign-btn-${itemId}`);
+      if (assignBtn) {
+        assignBtn.disabled = true;
+        assignBtn.innerHTML = '<div class="spinner-small"></div> Assigning...';
+      }
+      
+      // Close dropdown if open
+      const dropdown = document.getElementById('assign-dropdown');
+      if (dropdown) {
+        dropdown.remove();
+      }
+      
+      // Show toast notification
+      showToast('Updating assignment...');
+      
+      // Create a chain of Google Script calls
+      let chain = google.script.run
+        .withSuccessHandler(() => {
+          // After successful assignment, update status if needed
+          if (shouldUpdateStatus) {
+            return google.script.run
+              .withSuccessHandler(() => {
+                updateUIAfterAssignment(itemId, assigneeEmail, commentText, true, assignBtn);
+              })
+              .withFailureHandler((error) => {
+                console.error('Error updating status:', error);
+                // Still update UI even if status update fails
+                updateUIAfterAssignment(itemId, assigneeEmail, commentText, false, assignBtn);
+              })
+              .updateActionItemField(itemId, 'status', 'In Progress', 'Status automatically updated to \'In Progress\' on assignment');
+          } else {
+            updateUIAfterAssignment(itemId, assigneeEmail, commentText, false, assignBtn);
+          }
+        })
+        .withFailureHandler(error => {
+          console.error('Error assigning item:', error);
+          showErrorModal(
+            'Error Assigning Item', 
+            error.message || 'Failed to assign the item. Please try again.'
+          );
+          
+          // Reset button state
+          if (assignBtn) {
+            assignBtn.disabled = false;
+            assignBtn.textContent = wasAssigned ? 'Reassign' : 'Assign';
+          }
+          
+          window.isPerformingTaskAction = false;
+        });
+      
+      // Start the chain with the assignment update
+      chain.updateActionItemField(itemId, 'assignedTo', assigneeEmail, commentText);
+    }
+    
+    // Helper function to update UI after assignment is complete
+    function updateUIAfterAssignment(itemId, assigneeEmail, commentText, statusWasUpdated, assignBtn) {
+      const currentUser = getCurrentUserEmail();
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      
+      if (!item) {
+        console.error('Item not found after assignment');
+        window.isPerformingTaskAction = false;
+        return;
+      }
+      
+      // Update the assigned user in the UI
+      const assignedToEl = document.querySelector(`#assigned-user-${itemId}`);
+      if (assignedToEl) {
+        if (assigneeEmail) {
+          assignedToEl.innerHTML = `
+            <div class="assignee-display">
+              <span class="assignee-avatar">${getInitials(assigneeEmail)}</span>
+              <span>${formatEmailForDisplay(assigneeEmail)}</span>
+            </div>
+          `;
+        } else {
+          assignedToEl.textContent = 'Unassigned';
+        }
+      }
+      
+      // Update the button text
+      if (assignBtn) {
+        assignBtn.disabled = false;
+        assignBtn.textContent = assigneeEmail === currentUser ? 'Reassign' : 'Assign';
+      }
+      
+      // Update the local data model
+      const itemIndex = actionItems.findIndex(i => i.actionItemId === itemId);
+      if (itemIndex !== -1) {
+        actionItems[itemIndex].assignedTo = assigneeEmail;
+        if (statusWasUpdated) {
+          actionItems[itemIndex].status = 'In Progress';
+        }
+        actionItems[itemIndex].lastUpdated = new Date().toISOString();
+      }
+      
+      // Update status badge if status was updated
+      if (statusWasUpdated) {
+        const statusBadge = document.querySelector(`.status-badge[data-item-id="${itemId}"]`);
+        if (statusBadge) {
+          statusBadge.textContent = 'In Progress';
+          statusBadge.className = 'status-badge status-in-progress';
+          // Update the data-status attribute if it exists
+          statusBadge.setAttribute('data-status', 'In Progress');
+        }
+      }
+      
+      // Show success message with status update info if applicable
+      const statusMsg = statusWasUpdated ? ' and status updated to \'In Progress\'' : '';
+      showToast(`Action item ${assigneeEmail ? 'assigned' : 'unassigned'}${statusMsg} successfully`);
+      
+      // Refresh the comments to show the new assignment comment
+      if (document.getElementById('comments-container')) {
+        loadCommentsForItem(itemId);
+      }
+      
+      // Update the item in the main list if visible
+      const itemInList = document.querySelector(`[data-item-id="${itemId}"]`);
+      if (itemInList) {
+        // Update assignee
+        const assigneeEl = itemInList.querySelector('.assignee');
+        if (assigneeEl) {
+          assigneeEl.textContent = assigneeEmail ? formatEmailForDisplay(assigneeEmail) : 'Unassigned';
+        }
+        
+        // Update status if it was changed
+        if (statusWasUpdated) {
+          const statusEl = itemInList.querySelector('.status');
+          if (statusEl) {
+            statusEl.textContent = 'In Progress';
+            statusEl.className = 'status status-in-progress';
+          }
+        }
+      }
+      
+      window.isPerformingTaskAction = false;
+    }
+    
+    // Toggle assign dropdown when clicking the assign button
+    function selfAssignFromComments(itemId, event) {
+      console.log('selfAssignFromComments called with itemId:', itemId, 'and event:', event);
+      showAssignDropdown(itemId, event);
+    }
+    
+    // Complete from comments modal
+    function completeFromComments(itemId) {
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      
+      if (!item) {
+        alert('Action item not found');
+        return;
+      }
+      
+      // Add a completion comment
+      const commentText = `Marked as completed`;
+      
+      // Update the status to Completed
+      google.script.run
+        .withSuccessHandler(() => {
+          // Update the UI
+          item.status = 'Completed';
+          const statusEl = document.querySelector('.action-item-details .detail-item:nth-child(6) .detail-value');
+          if (statusEl) {
+            statusEl.textContent = 'Completed';
+          }
+          
+          // Remove the complete button
+          const completeBtn = document.querySelector('.action-buttons .action-btn.success');
+          if (completeBtn) {
+            completeBtn.remove();
+          }
+          
+          // Only try to add a comment if we're in the comments modal
+          const commentsModal = document.getElementById('comments-modal');
+          if (commentsModal && !commentsModal.hidden) {
+            const commentTextarea = document.getElementById('new-comment');
+            if (commentTextarea) {
+              commentTextarea.value = commentText;
+              
+              // Create and dispatch a click event on the post button
+              const postButton = document.getElementById('post-comment-btn');
+              if (postButton) {
+                postButton.click();
+              } else if (typeof addComment === 'function') {
+                // Only call addComment if it exists and is a function
+                addComment();
+              }
+            } else if (typeof addComment === 'function') {
+              // Only call addComment if it exists and is a function
+              addComment();
+            }
+          }
+          
+          // Show success message
+          showToast('Action item marked as completed');
+          
+          // Refresh the action items list to reflect the status change
+          loadActionItems();
+        })
+        .withFailureHandler(error => {
+          console.error('Error completing item:', error);
+          showErrorModal('Error Completing Item', error.message || 'Failed to complete the item. Please try again.');
+        })
+        .updateActionItemField(itemId, 'status', 'Completed');
+    }
+    
+    // Track if any assignments were made while the modal was open
+    let assignmentChanged = false;
+    
     // Close the comments modal
     function closeCommentsModal() {
       const modal = document.getElementById('commentsModal');
@@ -1076,6 +1742,18 @@
         modal.remove();
         // Re-enable body scrolling
         document.body.style.overflow = 'auto';
+        
+        // Refresh the action items list if assignments were changed
+        if (assignmentChanged) {
+          console.log('Assignment was changed, forcing full refresh of action items...');
+          // Force a complete refresh of the data from the server
+          loadActionItems(true);
+          assignmentChanged = false; // Reset the flag
+          
+          // Also force a re-render of any open tooltips or popovers
+          const tooltips = document.querySelectorAll('.tooltip, .popover');
+          tooltips.forEach(tooltip => tooltip.remove());
+        }
       }
     }
     
@@ -1699,40 +2377,60 @@
       const priorityClass = getPriorityClass(item.priority);
       const isOverdue = item.dueDate && new Date(item.dueDate) < new Date();
       const overdueClass = isOverdue ? 'overdue' : '';
+      const currentUser = getCurrentUserEmail();
       
       return `
         <div class="action-item ${overdueClass}" data-item-id="${item.actionItemId}">
           <div class="item-checkbox">
             <input type="checkbox" id="item-${item.actionItemId}" data-item-id="${item.actionItemId}">
           </div>
-          <div class="item-content">
-            <div class="item-header">
-              <h3 class="item-title">${item.title}</h3>
-              <div class="item-badges">
+          
+          <div class="item-main-content">
+            <div class="item-content">
+              <div class="item-header">
+                <h3 class="item-title">${item.title}${isOverdue ? ' <span class="overdue-badge">OVERDUE</span>' : ''}</h3>
+              </div>
+              <p class="item-description">${item.description || ''}</p>
+              <div class="item-meta">
+                <div class="meta-row">
+                  <span class="item-category">${item.categoryPath || 'No category'}</span>
+                </div>
+                <div class="meta-row">
+                  <span class="item-assignee">${item.assignedTo ? `Assigned to: ${item.assignedTo}` : 'Unassigned'}</span>
+                  ${item.mentionedUsers ? `<span class="item-mentions">Mentions: ${item.mentionedUsers}</span>` : ''}
+                </div>
+              </div>
+            </div>
+            
+            <div class="item-right-column">
+              <!-- First row: Status and Priority -->
+              <div class="status-row">
                 <span class="status-badge ${statusClass}">${item.status}</span>
                 ${item.priority ? `<span class="priority-badge ${priorityClass}">${item.priority}</span>` : ''}
-                ${isOverdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
+              </div>
+              
+              <!-- Second row: Due Date -->
+              ${item.dueDate ? `
+                <div class="due-date-row">
+                  <span class="due-date">Due: ${formatDate(item.dueDate)}</span>
+                </div>
+              ` : ''}
+              
+              <!-- Third row: Actions -->
+              <div class="actions-row">
+                ${item.createdBy === currentUser ? `
+                  <a href="#" class="action-link edit-link" data-action="edit">Edit</a>
+                  <span class="action-separator">•</span>
+                  <a href="#" class="action-link delete-link" data-action="delete">Delete</a>
+                ` : ''}
+                ${(!item.assignedTo || item.assignedTo === '') && item.createdBy === currentUser ? `
+                  <span class="action-separator">•</span>
+                ` : ''}
+                ${!item.assignedTo || item.assignedTo === '' ? `
+                  <a href="#" class="action-link self-assign-link" data-action="self-assign">Self-Assign</a>
+                ` : ''}
               </div>
             </div>
-            <p class="item-description">${item.description || ''}</p>
-            <div class="item-meta">
-              <div class="meta-row">
-                <span class="item-category">${item.categoryPath || 'No category'}</span>
-                ${item.dueDate ? `<span class="item-due-date">Due: ${formatDate(item.dueDate)}</span>` : ''}
-              </div>
-              <div class="meta-row">
-                <span class="item-assignee">${item.assignedTo ? `Assigned to: ${item.assignedTo}` : 'Unassigned'}</span>
-                ${item.mentionedUsers ? `<span class="item-mentions">Mentions: ${item.mentionedUsers}</span>` : ''}
-              </div>
-            </div>
-          </div>
-          <div class="item-actions">
-            ${item.createdBy === getCurrentUserEmail() ? `
-              <button class="action-btn primary" data-action="edit">Edit</button>
-              <button class="action-btn danger" data-action="delete">Delete</button>
-            ` : ''}
-            ${item.status !== 'Completed' ? `<button class="action-btn success" data-action="complete">Complete</button>` : ''}
-            ${!item.assignedTo || item.assignedTo === '' ? `<button class="action-btn secondary" data-action="self-assign">Self-Assign</button>` : ''}
           </div>
         </div>
       `;
@@ -1762,9 +2460,36 @@
 
     // Format date
     function formatDate(date) {
-      if (!date) return '';
+      if (!date) return 'No date';
       const d = new Date(date);
-      return d.toLocaleDateString();
+      return isNaN(d) ? 'Invalid date' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    
+    // Get user initials from email or name
+    function getInitials(email) {
+      if (!email) return '?';
+      // If it's an email, use the part before @
+      const namePart = email.split('@')[0];
+      // Split into parts and get first letter of each part
+      const parts = namePart.split(/[\s.]+/);
+      let initials = '';
+      // Get first letter of first part
+      if (parts[0]) initials += parts[0][0].toUpperCase();
+      // Get first letter of last part if it exists
+      if (parts.length > 1) initials += parts[parts.length - 1][0].toUpperCase();
+      return initials || '?';
+    }
+    
+    // Format email for display (show name part in title case)
+    function formatEmailForDisplay(email) {
+      if (!email) return '';
+      // If it's an email, use the part before @
+      const namePart = email.split('@')[0];
+      // Convert to title case (e.g., 'john.doe' -> 'John Doe')
+      return namePart
+        .split(/[.\-_]/)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+        .join(' ');
     }
 
     // Format date for input fields
@@ -2072,6 +2797,11 @@
 
     // Edit action item
     function editActionItem(actionItemId) {
+      // Set the flag to prevent full refresh during edit operation
+      if (typeof isPerformingTaskAction !== 'undefined') {
+        isPerformingTaskAction = true;
+      }
+
       const item = actionItems.find(i => i.actionItemId === actionItemId);
       if (!item) {
         console.error('Action item not found for editing:', actionItemId);
@@ -2080,61 +2810,97 @@
 
       console.log('Editing action item:', item);
 
-      // Get modal and form elements
+      // Get the edit modal and ensure it's the one being shown
       const modal = document.getElementById('item-modal');
       const form = document.getElementById('item-form');
       const modalTitle = document.getElementById('modal-title');
 
+      if (!modal || !form) {
+        console.error('Edit modal or form not found');
+        return;
+      }
+
       // Set modal title for editing
-      if (modalTitle) modalTitle.textContent = 'Edit Action Item';
+      modalTitle.textContent = 'Edit Action Item';
       
       // Reset form but preserve the ID
-      if (form) form.reset();
+      form.reset();
       
-      // Clear previous dynamic dropdowns
-      const categoryContainer = document.getElementById('dynamic-category-container');
-      if (categoryContainer) categoryContainer.innerHTML = '';
-      
-      // Load options first, then populate the form
-      loadActionItemOptions(() => {
-        // Set the item ID first
-        document.getElementById('item-id').value = item.actionItemId || '';
-      document.getElementById('item-title').value = item.title || '';
-      document.getElementById('item-description').value = item.description || '';
-      document.getElementById('item-assignee').value = item.assignedTo || '';
-      document.getElementById('item-due-date').value = item.dueDate ? item.dueDate.split('T')[0] : '';
-      document.getElementById('item-priority').value = item.priority || 'Medium';
-        document.getElementById('item-status').value = item.status || 'Open';
-    
-        // Populate other fields if they exist
-        const tagsField = document.getElementById('item-tags');
-        if (tagsField && item.tags) {
-          tagsField.value = Array.isArray(item.tags) ? item.tags.join(', ') : item.tags;
-        }
-    
-        const mentionsField = document.getElementById('item-mentions');
-        if (mentionsField && item.mentionedUsers) {
-          mentionsField.value = Array.isArray(item.mentionedUsers) ? item.mentionedUsers.join(', ') : item.mentionedUsers;
-        }
+      // Ensure we have an ID field
+      let idField = document.getElementById('item-id');
+      if (!idField) {
+        idField = document.createElement('input');
+        idField.type = 'hidden';
+        idField.id = 'item-id';
+        idField.name = 'id';
+        form.prepend(idField);
+      }
+      idField.value = item.actionItemId;
 
-        // Show the modal first
-        if (modal) modal.style.display = 'block';
-        
-        // Ensure the category dropdown is populated before trying to select a value
-        const categorySelect = document.getElementById('category-level-1');
-        if (categorySelect && categorySelect.options.length <= 1) {
-          // If the category dropdown isn't populated yet, wait for it
-          const checkCategorySelect = setInterval(() => {
-            if (categorySelect.options.length > 1) {
-              clearInterval(checkCategorySelect);
-              handleCategorySelection(item);
+      // Populate form fields with item data
+      if (item.title) document.getElementById('item-title').value = item.title;
+      if (item.description) document.getElementById('item-description').value = item.description || '';
+      if (item.status) document.getElementById('item-status').value = item.status;
+      if (item.priority) document.getElementById('item-priority').value = item.priority;
+      
+      // Format and set due date if it exists
+      if (item.dueDate) {
+        const dueDateInput = document.getElementById('item-due-date');
+        if (dueDateInput) {
+          try {
+            const dueDate = new Date(item.dueDate);
+            if (!isNaN(dueDate.getTime())) {
+              const formattedDate = dueDate.toISOString().split('T')[0];
+              dueDateInput.value = formattedDate;
             }
-          }, 50);
-        } else {
-          // If the dropdown is already populated, proceed with selection
-          handleCategorySelection(item);
+          } catch (e) {
+            console.error('Error formatting due date:', e);
+          }
         }
-      });
+      }
+      
+      // Handle category selection
+      if (item.categoryPath) {
+        // Clear any existing dropdowns beyond the first one
+        const dynamicContainer = document.getElementById('dynamic-category-container');
+        if (dynamicContainer) {
+          dynamicContainer.innerHTML = '';
+        }
+        
+        // This will be handled by the category change handler
+        const categorySelect = document.getElementById('category-level-1');
+        if (categorySelect) {
+          if (categorySelect.options.length <= 1) {
+            // If the category dropdown isn't populated yet, wait for it
+            const checkCategorySelect = setInterval(() => {
+              if (categorySelect.options.length > 1) {
+                clearInterval(checkCategorySelect);
+                handleCategorySelection(item);
+                // Show the modal after categories are loaded
+                $(modal).modal('show');
+              }
+            }, 50);
+          } else {
+            // If the dropdown is already populated, proceed with selection
+            handleCategorySelection(item);
+            // Show the modal immediately
+            $(modal).modal('show');
+          }
+        } else {
+          // If no category select, just show the modal
+          $(modal).modal('show');
+        }
+      } else {
+        // If no category path, just show the modal
+        $(modal).modal('show');
+      }
+      
+      // Reset the flag after a short delay to ensure modal is shown
+      setTimeout(() => {
+        if (typeof isPerformingTaskAction !== 'undefined') {
+          isPerformingTaskAction = false;
+        }
+      }, 1000);
     }
 
     async function selectCategoryPath(path) {
@@ -2575,6 +3341,35 @@
         .addCommentToActionItem(currentActionItemId, commentData);
     }
 
+    // Handle refresh button click
+    function handleRefreshClick(event) {
+      // Prevent default action
+      event.preventDefault();
+      
+      // Get the refresh button that was clicked
+      const refreshButton = event.target.closest('.secondary-btn');
+      
+      if (refreshButton) {
+        // Add refreshing class for animation
+        refreshButton.classList.add('refreshing');
+        
+        // Store the button text to restore it later
+        const originalText = refreshButton.innerHTML;
+        
+        // Change button text to indicate refreshing
+        refreshButton.disabled = true;
+        
+        // Force a refresh of the action items
+        loadActionItems(true);
+        
+        // Re-enable the button and restore its text after a short delay
+        setTimeout(() => {
+          refreshButton.classList.remove('refreshing');
+          refreshButton.disabled = false;
+        }, 1000);
+      }
+    }
+
     // Show spinner
     function showSpinner(message) {
       document.getElementById('spinner-overlay').classList.remove('hidden');
@@ -2720,26 +3515,106 @@
       }
     }
     
-    // Function to confirm deletion of an item
+    // Function to confirm deletion of an item with a custom modal
     function confirmDeleteItem(itemId) {
-      if (confirm('Are you sure you want to delete this item?')) {
-        deleteItem(itemId);
+      const item = actionItems.find(i => i.actionItemId === itemId);
+      if (!item) {
+        console.error('Item not found:', itemId);
+        return;
       }
+
+      // Create and show a styled confirmation modal
+      const modal = document.createElement('div');
+      modal.className = 'custom-confirm-modal';
+      modal.innerHTML = `
+        <div class="modal-content">
+          <h3>Confirm Deletion</h3>
+          <p>Are you sure you want to delete "${item.title || 'this item'}"? This action cannot be undone.</p>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" id="cancel-delete">Cancel</button>
+            <button class="btn btn-danger" id="confirm-delete">Delete</button>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+      
+      // Add event listeners
+      modal.querySelector('#cancel-delete').addEventListener('click', () => {
+        document.body.removeChild(modal);
+      });
+      
+      modal.querySelector('#confirm-delete').addEventListener('click', () => {
+        document.body.removeChild(modal);
+        deleteItem(itemId);
+      });
     }
     
-    // Function to delete an item
+    // Function to update item counters in the UI
+    function updateItemCounters() {
+      // Update the main item count
+      const itemCount = actionItems.length;
+      const countElement = document.getElementById('item-count');
+      if (countElement) {
+        countElement.textContent = itemCount;
+      }
+      
+      // Update the tab counts if they exist
+      const myItemsTab = document.querySelector('a[href="#my-items"] .badge');
+      const allItemsTab = document.querySelector('a[href="#all-items"] .badge');
+      
+      if (myItemsTab) {
+        const myItemsCount = actionItems.filter(item => 
+          item.assignedTo && item.assignedTo.includes(getCurrentUserEmail())
+        ).length;
+        myItemsTab.textContent = myItemsCount;
+      }
+      
+      if (allItemsTab) {
+        allItemsTab.textContent = itemCount;
+      }
+    }
+
+    // Function to delete an item with proper UI updates
     function deleteItem(itemId) {
       showSpinner('Deleting item...');
       
+      // Set the flag to prevent full refresh during delete operation
+      if (typeof isPerformingTaskAction !== 'undefined') {
+        isPerformingTaskAction = true;
+      }
+      
       google.script.run
         .withSuccessHandler(function() {
-          loadActionItems();
+          // Remove the item from the UI immediately
+          const itemElement = document.querySelector(`.action-item[data-item-id="${itemId}"]`);
+          if (itemElement) {
+            itemElement.remove();
+          }
+          
+          // Update the actionItems array
+          actionItems = actionItems.filter(item => item.actionItemId !== itemId);
+          
+          // Update any counters or UI elements
+          updateItemCounters();
+          
           hideSpinner();
+          showToast('Item deleted successfully', 'success');
+          
+          // Reset the flag
+          if (typeof isPerformingTaskAction !== 'undefined') {
+            isPerformingTaskAction = false;
+          }
         })
         .withFailureHandler(function(error) {
           console.error('Error deleting item:', error);
           hideSpinner();
-          alert('Error deleting item: ' + error);
+          showToast('Error deleting item: ' + error, 'error');
+          
+          // Reset the flag on error too
+          if (typeof isPerformingTaskAction !== 'undefined') {
+            isPerformingTaskAction = false;
+          }
         })
         .deleteActionItem(itemId);
     }
@@ -2833,6 +3708,41 @@
       document.body.addEventListener('change', function(event) {
         if (event.target.matches('.category-dropdown')) {
           handleCategoryChange(event);
+        }
+      });
+      
+      // Add event delegation for action links in action items
+      document.body.addEventListener('click', function(event) {
+        // Find the closest action item regardless of what was clicked
+        const actionItem = event.target.closest('.action-item');
+        if (!actionItem) return;
+        
+        // Try to get the item ID from data-item-id or data-id attribute
+        const itemId = actionItem.dataset.itemId || actionItem.dataset.id;
+        if (!itemId) {
+          console.error('No item ID found for action item:', actionItem);
+          return;
+        }
+        
+        // Check which action was clicked
+        if (event.target.closest('.edit-link')) {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log('Edit clicked for item:', itemId);
+          editActionItem(itemId);
+        } 
+        else if (event.target.closest('.delete-link')) {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log('Delete clicked for item:', itemId);
+          confirmDeleteItem(itemId);
+        }
+        else if (event.target.closest('.self-assign-link')) {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log('Self-assign clicked for item:', itemId);
+          const currentUser = getCurrentUserEmail();
+          assignActionItem(itemId, currentUser);
         }
       });
     });

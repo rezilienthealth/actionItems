@@ -11,7 +11,7 @@
     <div id="app">
       <header>
         <div class="header-container">
-          <h1>Action Items</h1>
+          <h1>Action Test Items</h1>
           <div class="user-info">
             <span id="user-email"><?= Session.getActiveUser().getEmail() ?></span>
             <span id="user-role" data-role="<?= getUserRole() ?>"></span>
@@ -38,6 +38,9 @@
         <div class="tab-content active" id="my-items-tab">
           <div class="controls">
             <button id="new-item-btn" class="primary-btn">New Action Item</button>
+            <button id="refresh-btn" class="secondary-btn" title="Refresh">
+              <span class="refresh-icon">↻</span>
+            </button>
             <button id="self-assign-btn" class="secondary-btn">Self-Assign Selected</button>
             
             <div class="advanced-filters">
@@ -100,6 +103,9 @@
         <div class="tab-content" id="all-items-tab">
           <div class="controls">
             <button id="new-item-btn-all" class="primary-btn">New Action Item</button>
+            <button id="refresh-btn-all" class="secondary-btn" title="Refresh">
+              <span class="refresh-icon">↻</span>
+            </button>
             <div class="filter-container">
               <div class="filter-row">
                 <select id="assignment-filter-all">

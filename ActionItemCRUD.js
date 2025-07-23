@@ -563,6 +563,54 @@ function assignActionItem(actionItemId, assigneeEmail) {
 }
 
 /**
+ * Updates a specific field of an action item
+ * @param {string} actionItemId - The ID of the action item to update
+ * @param {string} fieldName - The name of the field to update
+ * @param {string} fieldValue - The new value for the field
+ * @param {string} [comment] - Optional comment about the update
+ * @returns {Object} The updated action item
+ */
+function updateActionItemField(actionItemId, fieldName, fieldValue, comment) {
+  try {
+    // Get the current item
+    const item = getActionItemById(actionItemId);
+    
+    if (!item) {
+      throw new Error('Action item not found');
+    }
+    
+    // Store old value for audit log
+    const oldValue = item[fieldName] || '';
+    
+    // Update the field
+    item[fieldName] = fieldValue;
+    
+    // Update timestamps if this is an assignment change
+    if (fieldName === 'assignedTo') {
+      item.lastUpdated = new Date();
+      item.lastUpdatedBy = Session.getActiveUser().getEmail();
+    }
+    
+    // Save the updated item
+    const updatedItem = saveActionItem(item);
+    
+    // Log the field update to audit trail
+    logActionItemAudit(
+      actionItemId,
+      fieldName,
+      oldValue,
+      fieldValue,
+      comment
+    );
+    
+    return updatedItem;
+  } catch (error) {
+    Logger.log('ERROR in updateActionItemField: ' + error.toString());
+    throw error;
+  }
+}
+
+/**
  * Gets the history of an action item from the audit trail
  * @param {string} actionItemId - The ID of the action item
  * @returns {Array} Array of audit events
